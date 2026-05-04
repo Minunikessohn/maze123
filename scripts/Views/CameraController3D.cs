@@ -61,11 +61,7 @@ public partial class CameraController3D : Camera3D
 
     private void HandleMovement(double delta)
     {
-        Vector2 input = Vector2.Zero;
-        if (Input.IsPhysicalKeyPressed(Key.W)) input.Y += 1f;
-        if (Input.IsPhysicalKeyPressed(Key.S)) input.Y -= 1f;
-        if (Input.IsPhysicalKeyPressed(Key.A)) input.X -= 1f;
-        if (Input.IsPhysicalKeyPressed(Key.D)) input.X += 1f;
+        Vector2 input = GetMoveInput();
 
         Vector3 worldVertical = Vector3.Zero;
         if (Input.IsPhysicalKeyPressed(Key.E)) worldVertical += Vector3.Up;
@@ -84,9 +80,7 @@ public partial class CameraController3D : Camera3D
 
         if (input != Vector2.Zero)
         {
-            Vector3 forward = FlattenToGround(-GlobalBasis.Z);
-            Vector3 right = FlattenToGround(GlobalBasis.X);
-            Vector3 moveDirection = (right * input.X + forward * input.Y).Normalized();
+            Vector3 moveDirection = GetFreeMoveDirection(input);
 
             if (moveDirection != Vector3.Zero)
             {
@@ -120,20 +114,19 @@ public partial class CameraController3D : Camera3D
 
     public Direction GetFacingDirectionForInput()
     {
-        Vector2 input = Vector2.Zero;
-        if (Input.IsPhysicalKeyPressed(Key.W)) input.Y += 1f;
-        if (Input.IsPhysicalKeyPressed(Key.S)) input.Y -= 1f;
-        if (Input.IsPhysicalKeyPressed(Key.A)) input.X -= 1f;
-        if (Input.IsPhysicalKeyPressed(Key.D)) input.X += 1f;
+        Vector2 input = GetMoveInput();
 
         if (input == Vector2.Zero)
         {
             return Direction.North;
         }
 
-        Vector3 forward = FlattenToGround(-GlobalBasis.Z);
-        Vector3 right = FlattenToGround(GlobalBasis.X);
-        Vector3 desired = (right * input.X + forward * input.Y).Normalized();
+        Vector3 desired = GetGroundMovementDirection(input);
+        if (desired == Vector3.Zero)
+        {
+            return Direction.North;
+        }
+
         return WorldVectorToDirection(desired);
     }
 
@@ -333,6 +326,104 @@ public partial class CameraController3D : Camera3D
             Mathf.Sin(_followOrbitYaw) * cosPitch,
             sinPitch,
             Mathf.Cos(_followOrbitYaw) * cosPitch) * _followOrbitRadius;
+    }
+
+    private Vector2 GetMoveInput()
+    {
+        Vector2 input = Vector2.Zero;
+        if (Input.IsPhysicalKeyPressed(Key.W)) input.Y += 1f;
+        if (Input.IsPhysicalKeyPressed(Key.S)) input.Y -= 1f;
+        if (Input.IsPhysicalKeyPressed(Key.A)) input.X -= 1f;
+        if (Input.IsPhysicalKeyPressed(Key.D)) input.X += 1f;
+        return input;
+    }
+
+    private Vector3 GetGroundMovementDirection(Vector2 input)
+    {
+        if (input == Vector2.Zero)
+        {
+            return Vector3.Zero;
+        }
+
+        if (TryGetScreenGroundAxes(out Vector3 groundRight, out Vector3 groundDown))
+        {
+            Vector3 projectedDirection = (groundRight * input.X + groundDown * input.Y).Normalized();
+            if (projectedDirection != Vector3.Zero)
+            {
+                return projectedDirection;
+            }
+        }
+
+        Vector3 fallbackForward = FlattenToGround(GlobalBasis.Z);
+        Vector3 fallbackRight = FlattenToGround(GlobalBasis.X);
+        return (fallbackRight * input.X + fallbackForward * input.Y).Normalized();
+    }
+
+    private Vector3 GetFreeMoveDirection(Vector2 input)
+    {
+        if (input == Vector2.Zero)
+        {
+            return Vector3.Zero;
+        }
+
+        Vector3 strafeRight = FlattenToGround(GlobalBasis.X);
+        Vector3 forward = -GlobalBasis.Z;
+        return (strafeRight * input.X + forward * input.Y).Normalized();
+    }
+
+    private bool TryGetScreenGroundAxes(out Vector3 groundRight, out Vector3 groundDown)
+    {
+        groundRight = Vector3.Zero;
+        groundDown = Vector3.Zero;
+
+        Viewport? viewport = GetViewport();
+        if (viewport is null)
+        {
+            return false;
+        }
+
+        Vector2 viewportSize = viewport.GetVisibleRect().Size;
+        if (viewportSize.X <= 0f || viewportSize.Y <= 0f)
+        {
+            return false;
+        }
+
+        Vector2 center = viewportSize / 2f;
+        float sampleX = viewportSize.X * 0.2f;
+        float sampleY = viewportSize.Y * 0.2f;
+
+        if (!TryProjectToGround(center, out Vector3 centerPoint)
+            || !TryProjectToGround(center + new Vector2(sampleX, 0f), out Vector3 rightPoint)
+            || !TryProjectToGround(center + new Vector2(0f, sampleY), out Vector3 downPoint))
+        {
+            return false;
+        }
+
+        groundRight = FlattenToGround(rightPoint - centerPoint);
+        groundDown = FlattenToGround(downPoint - centerPoint);
+        return groundRight != Vector3.Zero && groundDown != Vector3.Zero;
+    }
+
+    private bool TryProjectToGround(Vector2 screenPosition, out Vector3 worldPoint)
+    {
+        Vector3 rayOrigin = ProjectRayOrigin(screenPosition);
+        Vector3 rayDirection = ProjectRayNormal(screenPosition);
+
+        if (Mathf.Abs(rayDirection.Y) < 0.0001f)
+        {
+            worldPoint = Vector3.Zero;
+            return false;
+        }
+
+        float distance = -rayOrigin.Y / rayDirection.Y;
+        if (distance <= 0f)
+        {
+            worldPoint = Vector3.Zero;
+            return false;
+        }
+
+        worldPoint = rayOrigin + rayDirection * distance;
+        return true;
     }
 
     private static Vector3 FlattenToGround(Vector3 vector)

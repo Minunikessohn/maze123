@@ -148,6 +148,7 @@ public partial class PlayerCharacter3D : Node3D
 
         Vector3 target = _waypoints[_currentIndex];
         Vector3 toTarget = target - Position;
+    FaceMovementDirection(toTarget);
         float remaining = toTarget.Length();
         float step = MoveSpeed * _cellSize * (float)delta;
 
@@ -224,8 +225,20 @@ public partial class PlayerCharacter3D : Node3D
         _animDuration = 1f / Mathf.Max(0.5f, MoveSpeed);
         _isAnimatingCell = true;
         _manualCell = next;
+        FaceMovementDirection(_animTo - _animFrom);
     }
 
     private Vector3 CellToWorld(Cell cell) =>
         new(cell.X * _cellSize + _cellSize / 2f, StandHeight, cell.Y * _cellSize + _cellSize / 2f);
+
+    private void FaceMovementDirection(Vector3 movement)
+    {
+        Vector3 planarMovement = new(movement.X, 0f, movement.Z);
+        if (planarMovement.LengthSquared() <= 0.0001f)
+        {
+            return;
+        }
+
+        Rotation = new Vector3(0f, Mathf.Atan2(planarMovement.X, planarMovement.Z), 0f);
+    }
 }
