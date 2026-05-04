@@ -8,7 +8,7 @@
 >
 > **Vorläufer-Plan B:** [`docs/2026-04-29-maze-improvements.md`](2026-04-29-maze-improvements.md) (Phasen 12–15 — große Mazes, Tempo-frei, frei steuerbare 3D-Kamera, 2D-Pan/Zoom).
 
-**Goal:** Vier Gamification-Erweiterungen am laufenden Maze-Projekt umsetzen — eine 3D-Spielfigur, die den vom Solver gefundenen Pfad sichtbar abläuft (mit optionaler Verfolger-Kamera), einen Selbstspiel-Modus mit WASD-Steuerung, Wandkollision, Stoppuhr und Sieg-Erkennung, einen Entdeckungs-Modus, der die Sicht des Spielers auf einen Lichtkreis um die Figur einschränkt, sowie einen Polish-Schritt, der den Capsule-Platzhalter durch eine animierte Lego-/Minecraft-aehnliche Figur ersetzt (sechs getexturierte Quader mit Sinus-Wellen-Animation, Vorbild: `DeveMazeGeneratorMonoGame.PlayerModel`). Der Plan baut bewusst aufeinander auf: die Figur aus Phase 16 wird in Phase 17 manuell steuerbar, die Beleuchtung aus Phase 18 setzt voraus, dass die Figur aus Phase 16 bereits existiert, und Phase 19 ersetzt nur das *Aussehen* — die Steuerung bleibt unveraendert.
+**Goal:** Vier Gamification-Erweiterungen am laufenden Maze-Projekt umsetzen — eine 3D-Spielfigur, die den vom Solver gefundenen Pfad sichtbar abläuft (mit optionaler Verfolger-Kamera), einen Selbstspiel-Modus mit WASD-Steuerung, Wandkollision, Stoppuhr und Sieg-Erkennung, einen Entdeckungs-Modus, der die Sicht des Spielers auf einen Lichtkreis um die Figur einschränkt, sowie einen Polish-Schritt, der den Capsule-Platzhalter durch eine animierte Lego-/Minecraft-aehnliche Figur ersetzt (sechs getexturierte Quader mit Sinus-Wellen-Animation). Der Plan baut bewusst aufeinander auf: die Figur aus Phase 16 wird in Phase 17 manuell steuerbar, die Beleuchtung aus Phase 18 setzt voraus, dass die Figur aus Phase 16 bereits existiert, und Phase 19 ersetzt nur das *Aussehen* — die Steuerung bleibt unveraendert.
 
 **Didaktischer Bogen:** Phase 16 zeigt das Ergebnis des Solvers als Bewegung — der Algorithmus hat den Pfad nicht nur in Farben markiert, sondern eine Figur kann ihn ablaufen. Phase 17 dreht die Perspektive: der Schüler erlebt selbst, wie aufwändig es ist, einen Weg zu finden, wenn man nicht den ganzen Plan sieht. Phase 18 setzt diesen Kontrast spürbar in Szene — Wände in der Ferne verschwinden im Dunkel, der Solver hingegen "sieht" weiterhin alles. Daraus lässt sich im Unterricht direkt das Thema *Informationsasymmetrie* aufgreifen: Algorithmen profitieren davon, das ganze Suchraum-Modell im Speicher zu haben, der Mensch muss erkunden.
 
@@ -1326,26 +1326,28 @@ Ziel: Den `CapsuleMesh`-Platzhalter aus Phase 16.1 durch eine animierte Lego-/Mi
 
 **Didaktischer Punkt:** Schueler sehen, dass eine "3D-Figur" in Godot nicht zwingend eine importierte Datei (FBX/GLTF) sein muss — sie kann komplett aus Code entstehen. Die Knoten-Hierarchie aus Pivot-`Node3D`s zeigt, wie man Skelett-Animationen "von Hand" macht: jeder Gelenkpunkt ist ein eigener Knoten, dessen Rotation sich pro Frame aendert.
 
-**Vorlage:** Das MonoGame-Projekt unter `C:\SourcesPrivate\DeveMazeGenerator\DeveMazeGeneratorMonoGame` baut die Figur in `PlayerModel.cs` und `CubeModelForPlayer.cs`. Wir uebernehmen Geometrie, UV-Aufteilung und Animations-Mathematik 1:1; die Code-Struktur passen wir an Godots Knoten-Hierarchie an. Die Atlas-Textur `Content/devedse.png` (64x32 Pixel, klassisches Minecraft-Skin-Layout) wird unveraendert kopiert.
+**Autarkie-Hinweis:** Alle fuer Phase 19 benoetigten Daten (Geometrie, UV-Aufteilung, Pivot-Struktur, Animationsformeln) sind in diesem Abschnitt dokumentiert. Es ist kein Nachschlagen in einem zweiten Projekt erforderlich.
 
-> **Welche Textur ist die richtige?** Im MonoGame-Projekt gibt es zwei verwirrend benannte Texturen: `lego.png` (256x256 Foto eines echten Lego-Zimmers, wird in `Game1.Draw` als *Bodenplatten*-Textur fuer den eingeblendeten Pfad-Marker benutzt) und `devedse.png` (64x32 Minecraft-Skin-Layout mit oranger Kappe, dunkelblauem Pulli, Hose). `Game1.cs` Zeile 689 (`effect.Texture = ContentDing.minecraftTexture;` direkt vor `playerModel.Draw(...)`) zeigt eindeutig, dass die *Spielfigur* mit `devedse.png` gezeichnet wird — der Variablenname `minecraftTexture` und der Datei-Inhalt bestaetigen das. `lego.png` ist fuer die Figur ungeeignet, weil das Layout nicht zu den Pixel-Rectangles in `TexturePosInfoGenerator.cs` passt. Wir verwenden also `devedse.png`.
+> **Textur fuer Phase 19:** Wir verwenden ausschliesslich `assets/devedse.png` aus diesem Repository (64x32 Pixel, Minecraft-Skin-Layout). Die UV-Rechtecke in Task 19.3 sind auf genau dieses Layout abgestimmt.
 
-**Strategie:** Wir bauen jeden Quader als `ArrayMesh` mit 24 Vertices (4 pro Seite, jede Seite eigene UV-Koordinaten) und 36 Indices. Jedes Koerperteil sitzt unter einem Pivot-`Node3D`, dessen `Position` so gewaehlt ist, dass dort das Gelenk liegt — `Rotation` am Pivot = Animation am Gelenk. Die Hierarchie spiegelt die Matrix-Verkettung des Originals.
+**Strategie:** Wir bauen jeden Quader als `ArrayMesh` mit 24 Vertices (4 pro Seite, jede Seite eigene UV-Koordinaten) und 36 Indices. Jedes Koerperteil sitzt unter einem Pivot-`Node3D`, dessen `Position` so gewaehlt ist, dass dort das Gelenk liegt — `Rotation` am Pivot = Animation am Gelenk. Die Hierarchie bildet die in diesem Plan definierte Gelenk-Logik direkt ab.
 
 ### Task 19.1: Texture-Asset uebernehmen
 
 **Files:**
-- Create: `assets/devedse.png` (kopiert aus dem MonoGame-Projekt)
+- Add/Track: `assets/devedse.png` (lokales Projekt-Asset)
 - Modify: `project.godot` (optional — Filter auf Nearest fuer crispe Pixel-Optik)
 
-- [ ] **Step 1: Verzeichnis anlegen und Datei kopieren**
+- [ ] **Step 1: Asset-Verzeichnis und Datei-Pruefung**
 
 ```powershell
 New-Item -ItemType Directory -Force -Path assets | Out-Null
-Copy-Item "C:\SourcesPrivate\DeveMazeGenerator\DeveMazeGeneratorMonoGame\Content\devedse.png" "assets\devedse.png"
+if (-not (Test-Path "assets\devedse.png")) {
+    throw "assets/devedse.png fehlt im Repository. Bitte Datei aus dem Kursmaterial in dieses Projekt legen."
+}
 ```
 
-> **Hinweis:** Das Original-PNG ist 64x32 Pixel im Minecraft-Skin-Layout. Falls die Datei im Quellprojekt eine andere Aufloesung haben sollte, weiterhin die UV-Koordinaten aus 19.3 verwenden — `RectangleExtensions.cs` im MonoGame-Projekt normalisiert ueber 64x32, und dieselbe Logik benutzen wir.
+> **Hinweis:** `devedse.png` muss 64x32 Pixel haben. Die UV-Koordinaten aus Task 19.3 sind auf diese Groesse normiert ($u=x/64$, $v=y/32$).
 
 - [ ] **Step 2: Godot importiert die Textur automatisch beim naechsten Start. Filter auf Nearest setzen**
 
@@ -1383,7 +1385,7 @@ namespace Maze.Views;
 
 /// <summary>
 /// Baut ein ArrayMesh fuer einen getexturierten Quader mit pro Seite eigenen UV-Koordinaten.
-/// Vorbild: <c>CubeModelForPlayer.cs</c> aus DeveMazeGeneratorMonoGame.
+/// Alle benoetigten UV-Konventionen stehen in diesem Plan (Phase 19).
 ///
 /// Jede Seite hat 4 Vertices in der Reihenfolge:
 ///   First (top-left), Second (top-right), Third (bottom-left), Fourth (bottom-right)
@@ -1394,7 +1396,7 @@ public static class TexturedCuboid
     /// <summary>
     /// Beschreibt ein UV-Rechteck einer Seite in Pixel-Koordinaten der Atlas-Textur.
     /// Negative Width/Height kehrt die UV-Achse um (= horizontaler / vertikaler Flip),
-    /// das wird im Original fuer den Spiegel-Look des rechten Arms genutzt.
+    /// das wird fuer den Spiegel-Look des rechten Arms genutzt.
     /// </summary>
     public readonly record struct UvRect(int X, int Y, int Width, int Height);
 
@@ -1484,7 +1486,7 @@ public static class TexturedCuboid
         norms[offset + 2] = normal;
         norms[offset + 3] = normal;
 
-        // Negative Breite/Hoehe in UvRect = Spiegel-Flag (siehe ArmRight im Original).
+        // Negative Breite/Hoehe in UvRect = Spiegel-Flag (siehe ArmRight).
         float u0 = rect.X / AtlasWidth;
         float v0u = rect.Y / AtlasHeight;
         float u1 = (rect.X + rect.Width) / AtlasWidth;
@@ -1521,7 +1523,7 @@ git commit -m "Task 19.2: TexturedCuboid-Helper fuer ArrayMesh mit per-face UVs"
 **Files:**
 - Create: `scripts/Views/LegoFigure.cs`
 
-> **Geometrie aus dem Original:** Kopf 8x8x8, Koerper 8x12x4, jeder Arm 4x12x4, jedes Bein 4x12x4. Atlas-Layout siehe `TexturePosInfoGenerator.cs`. Im Original liegt die Figur-Anker-Position auf Hueft-Hoehe (Koerper-Origin) — fuer Godot wickeln wir das in einen `Hip`-Pivot bei `Y = 12` (Bein-Hoehe), damit die Figur-Wurzel auf den Boden zeigt.
+> **Geometrie-Spezifikation:** Kopf 8x8x8, Koerper 8x12x4, jeder Arm 4x12x4, jedes Bein 4x12x4. Der Anker liegt auf Hueft-Hoehe; in Godot nutzen wir dafuer einen `Hip`-Pivot bei `Y = 12` (Bein-Hoehe), damit die Figur-Wurzel auf den Boden zeigt.
 
 - [ ] **Step 1: `scripts/Views/LegoFigure.cs` anlegen**
 
@@ -1531,13 +1533,13 @@ using Godot;
 namespace Maze.Views;
 
 /// <summary>
-/// Sechs-Quader-Spielfigur im Stil von DeveMazeGeneratorMonoGame.PlayerModel.
+/// Sechs-Quader-Spielfigur fuer Phase 19.
 /// Wurzel-Y = 0 entspricht Fuessen auf dem Boden; die Figur ist 32 Einheiten hoch in
 /// "Pixel-Koordinaten" und wird ueber den Skalierungsknoten in MazeView3D.tscn verkleinert.
 ///
 /// Pivot-Hierarchie (alle als <see cref="Node3D"/>):
 ///   LegoFigure (root, feet at Y=0)
-///   └─ Hip (Y=12) — entspricht parentMatrix-Origin im Original
+///   └─ Hip (Y=12) — entspricht der hier definierten Hueft-Ankerposition
 ///      ├─ BodyMesh
 ///      ├─ HeadPivot (am Hals, fuer Kopfbob/Drehung)
 ///      │  └─ HeadMesh
@@ -1577,7 +1579,7 @@ public partial class LegoFigure : Node3D
             8, 12, 4, BodyUvs(), material);
 
         // Head: Pivot bei Hals-Position (Mitte oben am Body, leicht nach hinten versetzt
-        // wie im Original mit (0, 12, -2)). HeadMesh-Mitte (4, 0, 4) auf Pivot legen.
+        // mit (0, 12, -2)). HeadMesh-Mitte (4, 0, 4) auf Pivot legen.
         HeadPivot = new Node3D { Name = "HeadPivot", Position = new Vector3(0, 12, 2) };
         hip.AddChild(HeadPivot);
         AddCuboid(HeadPivot, "HeadMesh", new Vector3(-4, 0, -4),
@@ -1620,7 +1622,7 @@ public partial class LegoFigure : Node3D
         parent.AddChild(instance);
     }
 
-    // UV-Rechtecke aus TexturePosInfoGenerator.cs (1:1 uebernommen).
+    // UV-Rechtecke fuer den 64x32-Atlas assets/devedse.png.
     private static TexturedCuboid.FaceUvs HeadUvs() => new(
         Front:  new(8, 8, 8, 8),
         Right:  new(16, 8, 8, 8),
@@ -1645,7 +1647,7 @@ public partial class LegoFigure : Node3D
         Top:    new(44, 16, 4, 4),
         Bottom: new(48, 16, 4, 4));
 
-    // Rechter Arm: gespiegelte UVs, im Original ueber negative Width im Rectangle.
+    // Rechter Arm: gespiegelte UVs ueber negative Width im Rectangle.
     private static TexturedCuboid.FaceUvs ArmRightUvs() => new(
         Front:  new(48, 20, -4, 12),
         Left:   new(52, 20, -4, 12),
@@ -1672,7 +1674,7 @@ public partial class LegoFigure : Node3D
 }
 ```
 
-> **Hinweis:** Die Pivot-Positionen sind etwas anders als die direkte Matrix-Multiplikation des Originals — wir nutzen Godots Knoten-Transformations-Vererbung. Der Effekt ist identisch: die Schulter sitzt am oberen Rand des Arm-Quaders, der Schwung erfolgt um diese Achse.
+> **Hinweis:** Wir nutzen bewusst Godots Knoten-Transformations-Vererbung statt manueller Matrix-Multiplikation. Der Effekt bleibt identisch: die Schulter sitzt am oberen Rand des Arm-Quaders, der Schwung erfolgt um diese Achse.
 
 - [ ] **Step 2: Build pruefen**
 
@@ -1723,10 +1725,10 @@ public override void _Process(double delta)
 
     float v = _walkPhase;
 
-    // Rotationen aus PlayerModel.Draw 1:1 uebernommen.
+    // Ziel: deutlicher Gehschwung fuer Arme/Beine und leichtes Kopfwackeln.
     // Pitch = X-Achse, Yaw = Y-Achse, Roll = Z-Achse in Godot.
     HeadPivot.Rotation = new Vector3(
-        Mathf.Sin(v) / 10f,   // sin(value*8) im Original — value*8 ist hier _walkPhase, weil _walkPhase = elapsed * WalkSpeedScale
+        Mathf.Sin(v) / 10f,   // _walkPhase = elapsed * WalkSpeedScale, daher ist bei WalkSpeedScale=8 der Kopfbob-Term sin(value*8)
         HeadTurn,
         0f);
 
@@ -1752,7 +1754,7 @@ public override void _Process(double delta)
 }
 ```
 
-> **Mathe-Hinweis:** Im Original wird der Phasenakkumulator `value` direkt als Eingabe verwendet, mit Faktoren 5, 7, 8, 9 fuer die unterschiedlichen Frequenzen. Wir setzen `WalkSpeedScale = 8`, sodass `_walkPhase` pro Sekunde um 8 steigt — genau passend fuer den Kopfbob-Term `sin(value*8)`. Fuer die anderen Glieder skalieren wir entsprechend (5/8, 7/8, 9/8). Wer das mathematisch sauberer haben moechte, kann `WalkSpeedScale = 1` setzen und alle inneren Faktoren auf 5, 7, 8, 9 belassen — das Ergebnis ist identisch.
+> **Mathe-Hinweis:** Der Phasenakkumulator `_walkPhase` wird direkt als Eingabe verwendet, mit Faktoren 5, 7, 8, 9 fuer unterschiedliche Frequenzen. Wir setzen `WalkSpeedScale = 8`, sodass `_walkPhase` pro Sekunde um 8 steigt — passend fuer den Kopfbob-Term `sin(value*8)`. Fuer die anderen Glieder skalieren wir entsprechend (5/8, 7/8, 9/8). Wer das mathematisch sauberer haben moechte, kann `WalkSpeedScale = 1` setzen und alle inneren Faktoren auf 5, 7, 8, 9 belassen — das Ergebnis ist identisch.
 
 - [ ] **Step 2: Build und visueller Test (Standalone, ohne Maze)**
 
