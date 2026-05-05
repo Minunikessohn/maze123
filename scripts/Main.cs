@@ -49,6 +49,7 @@ public partial class Main : Node
     private readonly Random _random = new();
     private readonly PerformanceTracker _tracker = new();
     private bool _suppressViewRefresh;
+    private bool _userRequestedUnboundedMode;
     private bool _followCamEnabled;
     private bool _followCamEnabledBeforeManual;
     private bool _isManualMode;
@@ -85,6 +86,7 @@ public partial class Main : Node
         _runner.SolverStepProduced += OnSolverStepProduced;
         _runner.SolverFinished += OnSolverFinished;
         ApplySimulationSpeed(DefaultStepsPerSecond);
+        ApplyEffectiveRunnerMode();
 
         GD.Print("[Main] HUD, 2D-View und 3D-View verbunden.");
     }
@@ -144,7 +146,7 @@ public partial class Main : Node
         _tracker.TickStep();
         _tracker.IncrementVisited();
 
-        if (_suppressViewRefresh)
+        if (!ShouldRefreshStepViews())
         {
             return;
         }
@@ -245,7 +247,7 @@ public partial class Main : Node
             _solverPath.Add(step.Cell);
         }
 
-        if (_suppressViewRefresh)
+        if (!ShouldRefreshStepViews())
         {
             return;
         }
@@ -328,6 +330,8 @@ public partial class Main : Node
             _lastMazeBuiltFor3D = _currentMaze;
         }
 
+        ApplyEffectiveRunnerMode();
+
         GD.Print($"[Main] 3D-Ansicht = {use3D}");
     }
 
@@ -366,8 +370,9 @@ public partial class Main : Node
 
     private void OnUnboundedModeChanged(bool unbounded)
     {
+        _userRequestedUnboundedMode = unbounded;
         _suppressViewRefresh = unbounded;
-        _runner.Mode = unbounded ? AlgorithmRunner.RunMode.Unbounded : AlgorithmRunner.RunMode.Throttled;
+        ApplyEffectiveRunnerMode();
     }
 
     private void OnBotGoalReached()
@@ -421,6 +426,7 @@ public partial class Main : Node
         _player.EnableManualMode(_currentMaze, _solverStart, _solverGoal, _view3D.CellSize, camera);
         _isManualMode = true;
         _manualStartTimeSeconds = Time.GetTicksMsec() / 1000.0;
+        ApplyEffectiveRunnerMode();
 
         _followCamEnabledBeforeManual = _followCamEnabled;
         _followCamEnabled = true;
@@ -445,6 +451,7 @@ public partial class Main : Node
         camera.DisableFollow();
 
         _followCamEnabled = _followCamEnabledBeforeManual;
+        ApplyEffectiveRunnerMode();
         _hud.SetFollowCamActive(_followCamEnabled);
         _hud.SetManualPlayActive(false);
         GD.Print("[Main] Selbst spielen beendet.");
@@ -460,6 +467,18 @@ public partial class Main : Node
     {
         _hud.SetExploreModeActive(false);
         _view3D.SetExploreMode(false);
+    }
+
+    private bool ShouldRefreshStepViews() =>
+        !_suppressViewRefresh && !ShouldSkipInvisibleStepVisualization();
+
+    private bool ShouldSkipInvisibleStepVisualization() =>
+        _view3D.Visible && !_isManualMode;
+
+    private void ApplyEffectiveRunnerMode()
+    {
+        bool runUnbounded = _userRequestedUnboundedMode || ShouldSkipInvisibleStepVisualization();
+        _runner.Mode = runUnbounded ? AlgorithmRunner.RunMode.Unbounded : AlgorithmRunner.RunMode.Throttled;
     }
 
     private static bool AreNeighbors(Cell a, Cell b) =>
