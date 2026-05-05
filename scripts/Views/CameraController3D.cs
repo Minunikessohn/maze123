@@ -168,7 +168,7 @@ public partial class CameraController3D : Camera3D
 
         if (@event is InputEventMouseMotion motion && _mouseLook)
         {
-            _yaw -= motion.Relative.X * MouseSensitivity;
+            _yaw += motion.Relative.X * MouseSensitivity;
             _pitch = Mathf.Clamp(_pitch - motion.Relative.Y * MouseSensitivity, -1.4f, 1.4f);
         }
     }
@@ -297,7 +297,7 @@ public partial class CameraController3D : Camera3D
 
         if (@event is InputEventMouseMotion motion && _mouseLook)
         {
-            _followOrbitYaw += motion.Relative.X * MouseSensitivity;
+            _followOrbitYaw -= motion.Relative.X * MouseSensitivity;
             _followOrbitPitch = Mathf.Clamp(_followOrbitPitch + motion.Relative.Y * MouseSensitivity, 0.05f, Mathf.Pi / 2f - 0.05f);
         }
     }
@@ -347,14 +347,14 @@ public partial class CameraController3D : Camera3D
 
         if (TryGetScreenGroundAxes(out Vector3 groundRight, out Vector3 groundDown))
         {
-            Vector3 projectedDirection = (groundRight * input.X + groundDown * input.Y).Normalized();
+            Vector3 projectedDirection = (groundRight * input.X - groundDown * input.Y).Normalized();
             if (projectedDirection != Vector3.Zero)
             {
                 return projectedDirection;
             }
         }
 
-        Vector3 fallbackForward = FlattenToGround(GlobalBasis.Z);
+        Vector3 fallbackForward = FlattenToGround(-GlobalBasis.Z);
         Vector3 fallbackRight = FlattenToGround(GlobalBasis.X);
         return (fallbackRight * input.X + fallbackForward * input.Y).Normalized();
     }

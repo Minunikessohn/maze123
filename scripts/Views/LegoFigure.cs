@@ -9,6 +9,8 @@ namespace Maze.Views;
 /// </summary>
 public partial class LegoFigure : Node3D
 {
+    private const string DefaultAtlasPath = "res://assets/devedse.png";
+
     [Export] public Texture2D? AtlasTexture;
     [Export] public float WalkSpeedScale = 8f;
     [Export] public float HeadTurn = 0f;
@@ -24,6 +26,8 @@ public partial class LegoFigure : Node3D
 
     public override void _Ready()
     {
+        AtlasTexture ??= ResourceLoader.Load<Texture2D>(DefaultAtlasPath);
+
         StandardMaterial3D material = new()
         {
             AlbedoTexture = AtlasTexture,
