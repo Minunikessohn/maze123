@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using Godot;
+using Maze.Game;
 using Maze.Generators;
 using Maze.Model;
 using Maze.Solvers;
@@ -46,8 +47,10 @@ public partial class Main : Node
         ["dead-end-filling"] = new DeadEndFillingSolver()
     };
 
-    private readonly Random _random = new();
+    private Random _random = new();
     private readonly PerformanceTracker _tracker = new();
+    private MazeGameConfig? _currentGameConfig;
+    private readonly GameSessionState _sessionState = new();
     private bool _suppressViewRefresh;
     private bool _userRequestedUnboundedMode;
     private bool _followCamEnabled;
@@ -112,13 +115,23 @@ public partial class Main : Node
 
     private void OnGenerateRequested(int width, int height, string generatorId)
     {
+        StartNewGame(MazeGameConfig.CreateDefault(width, height, generatorId));
+    }
+
+    private void StartNewGame(MazeGameConfig config)
+    {
         OnStopManualRequested();
 
-        if (!_generators.TryGetValue(generatorId, out IMazeGenerator? generator))
+        MazeGameConfig sanitizedConfig = config.Clone().Sanitize();
+
+        if (!_generators.TryGetValue(sanitizedConfig.GeneratorId, out IMazeGenerator? generator))
         {
-            GD.PrintErr($"Unbekannter Generator: {generatorId}");
+            GD.PrintErr($"Unbekannter Generator: {sanitizedConfig.GeneratorId}");
             return;
         }
+
+        _currentGameConfig = sanitizedConfig;
+        _random = new Random(sanitizedConfig.Seed);
 
         _tracker.Start();
         _runner.StopAll();
@@ -127,7 +140,8 @@ public partial class Main : Node
         _view3D.ClearTrail();
         ResetExploreMode();
         _view3D.GetNode<CameraController3D>("Camera3D").DisableFollow();
-        _currentMaze = new global::Maze.Model.Maze(width, height);
+        _currentMaze = new global::Maze.Model.Maze(sanitizedConfig.Width, sanitizedConfig.Height);
+        _sessionState.ResetForNewGame(sanitizedConfig, _currentMaze);
         _lastMazeBuiltFor3D = null;
         _view2D.SetMaze(_currentMaze);
         _view3D.ClearMaze();
@@ -172,6 +186,11 @@ public partial class Main : Node
         _view2D.ForceRefresh();
         _view3D.SetMaze(_currentMaze);
         _lastMazeBuiltFor3D = _currentMaze;
+        _sessionState.IsRunning = true;
+        _sessionState.IsPaused = false;
+        _sessionState.GoalReached = false;
+        _sessionState.StartCell = null;
+        _sessionState.GoalCell = null;
         _tracker.Stop();
         _stats.UpdateStats(_tracker.Elapsed, _tracker.Steps, _tracker.VisitedCells, 0, _tracker.ManagedMemoryDeltaBytes);
         GD.Print("[Main] Generator fertig.");
@@ -202,6 +221,9 @@ public partial class Main : Node
         _view3D.GetNode<CameraController3D>("Camera3D").DisableFollow();
         _solverStart = _currentMaze.GetCell(0, 0);
         _solverGoal = _currentMaze.GetCell(_currentMaze.Width - 1, _currentMaze.Height - 1);
+        _sessionState.StartCell = _solverStart;
+        _sessionState.GoalCell = _solverGoal;
+        _sessionState.GoalReached = false;
         _solverStart.State = CellState.Start;
         _solverGoal.State = CellState.Goal;
         _view2D.Refresh();
@@ -288,8 +310,11 @@ public partial class Main : Node
     private void OnSpeedChanged(float stepsPerSecond) =>
         ApplySimulationSpeed(stepsPerSecond);
 
-    private void OnPauseToggled(bool paused) =>
+    private void OnPauseToggled(bool paused)
+    {
         _runner.IsPaused = paused;
+        _sessionState.IsPaused = paused;
+    }
 
     private void OnStepRequested() =>
         _runner.ForceSingleStep();
@@ -311,6 +336,8 @@ public partial class Main : Node
         }
 
         _currentMaze.ResetSolverState();
+        _sessionState.GoalReached = false;
+        _sessionState.IsPaused = false;
         _view2D.ForceRefresh();
         _view3D.Refresh();
         _stats.UpdateStats(TimeSpan.Zero, 0, 0, 0, 0);
@@ -381,6 +408,8 @@ public partial class Main : Node
 
     private void OnBotGoalReached()
     {
+        _sessionState.GoalReached = true;
+
         if (_isManualMode)
         {
             double elapsed = Time.GetTicksMsec() / 1000.0 - _manualStartTimeSeconds;
@@ -423,6 +452,9 @@ public partial class Main : Node
         _view3D.ClearTrail();
         _solverStart = _currentMaze.GetCell(0, 0);
         _solverGoal = _currentMaze.GetCell(_currentMaze.Width - 1, _currentMaze.Height - 1);
+        _sessionState.StartCell = _solverStart;
+        _sessionState.GoalCell = _solverGoal;
+        _sessionState.GoalReached = false;
         _solverStart.State = CellState.Start;
         _solverGoal.State = CellState.Goal;
         _view2D.ForceRefresh();
@@ -435,6 +467,7 @@ public partial class Main : Node
         CameraController3D camera = _view3D.GetNode<CameraController3D>("Camera3D");
         _player.EnableManualMode(_currentMaze, _solverStart, _solverGoal, _view3D.CellSize, camera);
         _isManualMode = true;
+        _sessionState.IsManualMode = true;
         _manualStartTimeSeconds = Time.GetTicksMsec() / 1000.0;
         ApplyEffectiveRunnerMode();
 
@@ -456,6 +489,7 @@ public partial class Main : Node
 
         _player.DisableManualMode();
         _isManualMode = false;
+        _sessionState.IsManualMode = false;
 
         CameraController3D camera = _view3D.GetNode<CameraController3D>("Camera3D");
         camera.DisableFollow();
