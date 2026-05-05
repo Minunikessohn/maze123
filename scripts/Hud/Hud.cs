@@ -26,6 +26,7 @@ public partial class Hud : CanvasLayer
     private HSlider _speedSlider = null!;
     private SpinBox _widthSpinBox = null!;
     private SpinBox _heightSpinBox = null!;
+    private SpinBox _speedSpinBox = null!;
     private OptionButton _generatorChooser = null!;
     private OptionButton _solverChooser = null!;
     private Button _generateButton = null!;
@@ -51,6 +52,7 @@ public partial class Hud : CanvasLayer
         _speedSlider = GetNode<HSlider>("Root/Margin/VBox/SpeedRow/SpeedSlider");
         _widthSpinBox = GetNode<SpinBox>("Root/Margin/VBox/Sizes/WidthSpinBox");
         _heightSpinBox = GetNode<SpinBox>("Root/Margin/VBox/Sizes/HeightSpinBox");
+        _speedSpinBox = GetNode<SpinBox>("Root/Margin/VBox/SpeedRow/SpeedSpinBox");
         _generatorChooser = GetNode<OptionButton>("Root/Margin/VBox/Algos/GeneratorChooser");
         _solverChooser = GetNode<OptionButton>("Root/Margin/VBox/Algos/SolverChooser");
         _generateButton = GetNode<Button>("Root/Margin/VBox/Buttons/GenerateButton");
@@ -94,6 +96,11 @@ public partial class Hud : CanvasLayer
         _speedSlider.Step = 1;
         _speedSlider.Value = 30;
 
+        _speedSpinBox.MinValue = 1;
+        _speedSpinBox.MaxValue = 10001;
+        _speedSpinBox.Step = 1;
+        _speedSpinBox.Value = 30;
+
         UpdateLabels();
 
         _widthSlider.ValueChanged += value =>
@@ -116,7 +123,16 @@ public partial class Hud : CanvasLayer
             _heightSlider.SetValueNoSignal(value);
             UpdateLabels();
         };
-        _speedSlider.ValueChanged += OnSpeedChanged;
+        _speedSlider.ValueChanged += value =>
+        {
+            _speedSpinBox.SetValueNoSignal(value);
+            OnSpeedChanged(value);
+        };
+        _speedSpinBox.ValueChanged += value =>
+        {
+            _speedSlider.SetValueNoSignal(value);
+            OnSpeedChanged(value);
+        };
         _unboundedToggle.Toggled += OnUnboundedToggled;
         _generateButton.Pressed += OnGeneratePressed;
         _solveButton.Pressed += OnSolvePressed;
@@ -157,6 +173,7 @@ public partial class Hud : CanvasLayer
     private void OnUnboundedToggled(bool pressed)
     {
         _speedSlider.Editable = !pressed;
+        _speedSpinBox.Editable = !pressed;
         UpdateLabels();
         EmitSignal(SignalName.UnboundedModeChanged, pressed);
     }
