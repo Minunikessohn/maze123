@@ -24,15 +24,55 @@ public partial class MazeView3D : Node3D
     private OmniLight3D _playerLight = null!;
     private WorldEnvironment _worldEnvironment = null!;
     private Node3D _wallContainer = null!;
+    private Node3D _markerContainer = null!;
     private MeshInstance3D _floor = null!;
     private MultiMeshInstance3D _wallsHorizontal = null!;
     private MultiMeshInstance3D _wallsVertical = null!;
+    private Node3D _startMarker = null!;
+    private Node3D _goalMarker = null!;
+    private Node3D _startMarkerAccent = null!;
+    private Node3D _goalMarkerAccent = null!;
+    private OmniLight3D _startMarkerLight = null!;
+    private OmniLight3D _goalMarkerLight = null!;
     private bool _exploreTarget;
     private float _exploreFactor;
+    private float _markerAnimationTime;
 
     private const float DaySunEnergy = 1.0f;
     private const float DayAmbientEnergy = 0.4f;
     private const float ExploreLerpSpeed = 1.6f;
+    private static readonly Color StartMarkerColor = new("#a3be8c");
+    private static readonly Color GoalMarkerColor = new("#bf616a");
+    private static readonly StandardMaterial3D MarkerBaseMaterial = new()
+    {
+        AlbedoColor = new Color("#20252b"),
+        Metallic = 0.08f,
+        Roughness = 0.32f
+    };
+    private static readonly StandardMaterial3D MarkerTrimMaterial = new()
+    {
+        AlbedoColor = new Color("#3f4953"),
+        Metallic = 0.25f,
+        Roughness = 0.18f
+    };
+    private static readonly StandardMaterial3D StartMarkerMaterial = new()
+    {
+        AlbedoColor = StartMarkerColor,
+        EmissionEnabled = true,
+        Emission = StartMarkerColor,
+        EmissionEnergyMultiplier = 1.7f,
+        Metallic = 0.12f,
+        Roughness = 0.14f
+    };
+    private static readonly StandardMaterial3D GoalMarkerMaterial = new()
+    {
+        AlbedoColor = GoalMarkerColor,
+        EmissionEnabled = true,
+        Emission = GoalMarkerColor,
+        EmissionEnergyMultiplier = 1.95f,
+        Metallic = 0.1f,
+        Roughness = 0.12f
+    };
 
     private static readonly StandardMaterial3D WallMaterial = new()
     {
@@ -56,6 +96,7 @@ public partial class MazeView3D : Node3D
         _floor = GetNode<MeshInstance3D>("Floor");
         _wallsHorizontal = GetNode<MultiMeshInstance3D>("WallContainer/WallsHorizontal");
         _wallsVertical = GetNode<MultiMeshInstance3D>("WallContainer/WallsVertical");
+        InitializeMarkers();
 
         _wallsHorizontal.MaterialOverride = WallMaterial;
         _wallsVertical.MaterialOverride = WallMaterial;
@@ -78,6 +119,8 @@ public partial class MazeView3D : Node3D
 
         _exploreFactor = Mathf.MoveToward(_exploreFactor, target, ExploreLerpSpeed * (float)delta);
         ApplyExploreFactor(_exploreFactor);
+
+        AnimateMarkers((float)delta);
     }
 
     public void SetMaze(global::Maze.Model.Maze maze)
@@ -92,6 +135,8 @@ public partial class MazeView3D : Node3D
         _maze = null;
         _floor.Mesh = null;
         ResetMultiMeshes();
+        _startMarker.Visible = false;
+        _goalMarker.Visible = false;
     }
 
     public void Refresh()
@@ -114,6 +159,7 @@ public partial class MazeView3D : Node3D
 
         BuildFloor(_maze);
         BuildWalls(_maze);
+        UpdateMarkers(_maze);
     }
 
     private void ResetMultiMeshes()
@@ -184,6 +230,196 @@ public partial class MazeView3D : Node3D
     {
         _wallsHorizontal.Multimesh.Mesh = new BoxMesh { Size = new Vector3(CellSize, WallHeight, WallThickness) };
         _wallsVertical.Multimesh.Mesh = new BoxMesh { Size = new Vector3(WallThickness, WallHeight, CellSize) };
+    }
+
+    private void InitializeMarkers()
+    {
+        _markerContainer = new Node3D { Name = "MarkerContainer" };
+        AddChild(_markerContainer);
+
+        (_startMarker, _startMarkerAccent, _startMarkerLight) = CreateStartMarker();
+        (_goalMarker, _goalMarkerAccent, _goalMarkerLight) = CreateGoalMarker();
+
+        _markerContainer.AddChild(_startMarker);
+        _markerContainer.AddChild(_goalMarker);
+        _startMarker.Visible = false;
+        _goalMarker.Visible = false;
+    }
+
+    private (Node3D Root, Node3D Accent, OmniLight3D Light) CreateStartMarker()
+    {
+        Node3D root = new() { Name = "StartMarker" };
+        root.AddChild(CreateMeshInstance(new CylinderMesh
+        {
+            Height = 0.12f,
+            TopRadius = 0.34f,
+            BottomRadius = 0.38f,
+            RadialSegments = 24
+        }, MarkerBaseMaterial, new Vector3(0f, 0.06f, 0f)));
+        root.AddChild(CreateMeshInstance(new CylinderMesh
+        {
+            Height = 0.025f,
+            TopRadius = 0.24f,
+            BottomRadius = 0.28f,
+            RadialSegments = 24
+        }, StartMarkerMaterial, new Vector3(0f, 0.135f, 0f)));
+
+        Node3D accent = new() { Name = "Accent" };
+        accent.AddChild(CreateMeshInstance(new CylinderMesh
+        {
+            Height = 0.42f,
+            TopRadius = 0.07f,
+            BottomRadius = 0.09f,
+            RadialSegments = 20
+        }, MarkerTrimMaterial, new Vector3(0f, 0.35f, 0f)));
+        accent.AddChild(CreateMeshInstance(new SphereMesh
+        {
+            Radius = 0.13f,
+            Height = 0.26f,
+            RadialSegments = 20,
+            Rings = 10
+        }, StartMarkerMaterial, new Vector3(0f, 0.63f, 0f)));
+
+        for (int index = 0; index < 4; index++)
+        {
+            float angle = Mathf.Pi * 0.5f * index;
+            Vector3 finPosition = new(Mathf.Cos(angle) * 0.16f, 0.36f, Mathf.Sin(angle) * 0.16f);
+            BoxMesh finMesh = new()
+            {
+                Size = new Vector3(0.05f, 0.18f, 0.2f)
+            };
+
+            MeshInstance3D fin = CreateMeshInstance(finMesh, StartMarkerMaterial, finPosition);
+            fin.Rotation = new Vector3(0f, angle, 0f);
+            accent.AddChild(fin);
+        }
+
+        root.AddChild(accent);
+
+        OmniLight3D light = new()
+        {
+            Name = "Glow",
+            Position = new Vector3(0f, 0.72f, 0f),
+            OmniRange = 2.4f,
+            LightEnergy = 0.85f,
+            LightColor = StartMarkerColor,
+            ShadowEnabled = false
+        };
+        root.AddChild(light);
+
+        return (root, accent, light);
+    }
+
+    private (Node3D Root, Node3D Accent, OmniLight3D Light) CreateGoalMarker()
+    {
+        Node3D root = new() { Name = "GoalMarker" };
+        root.AddChild(CreateMeshInstance(new CylinderMesh
+        {
+            Height = 0.14f,
+            TopRadius = 0.36f,
+            BottomRadius = 0.4f,
+            RadialSegments = 24
+        }, MarkerBaseMaterial, new Vector3(0f, 0.07f, 0f)));
+        root.AddChild(CreateMeshInstance(new CylinderMesh
+        {
+            Height = 0.03f,
+            TopRadius = 0.19f,
+            BottomRadius = 0.24f,
+            RadialSegments = 24
+        }, GoalMarkerMaterial, new Vector3(0f, 0.155f, 0f)));
+
+        Node3D accent = new() { Name = "Accent" };
+        accent.AddChild(CreateMeshInstance(new CylinderMesh
+        {
+            Height = 0.45f,
+            TopRadius = 0.035f,
+            BottomRadius = 0.055f,
+            RadialSegments = 18
+        }, MarkerTrimMaterial, new Vector3(0f, 0.42f, 0f)));
+
+        for (int index = 0; index < 3; index++)
+        {
+            float angle = index * Mathf.Tau / 3f;
+            Vector3 pillarPosition = new(Mathf.Cos(angle) * 0.19f, 0.34f, Mathf.Sin(angle) * 0.19f);
+            accent.AddChild(CreateMeshInstance(new CylinderMesh
+            {
+                Height = 0.3f,
+                TopRadius = 0.045f,
+                BottomRadius = 0.06f,
+                RadialSegments = 18
+            }, GoalMarkerMaterial, pillarPosition));
+        }
+
+        accent.AddChild(CreateMeshInstance(new SphereMesh
+        {
+            Radius = 0.12f,
+            Height = 0.26f,
+            RadialSegments = 20,
+            Rings = 10
+        }, GoalMarkerMaterial, new Vector3(0f, 0.74f, 0f)));
+        root.AddChild(accent);
+
+        OmniLight3D light = new()
+        {
+            Name = "Glow",
+            Position = new Vector3(0f, 0.8f, 0f),
+            OmniRange = 2.9f,
+            LightEnergy = 1.05f,
+            LightColor = GoalMarkerColor,
+            ShadowEnabled = false
+        };
+        root.AddChild(light);
+
+        return (root, accent, light);
+    }
+
+    private MeshInstance3D CreateMeshInstance(Mesh mesh, Material material, Vector3 position)
+    {
+        MeshInstance3D meshInstance = new()
+        {
+            Mesh = mesh,
+            MaterialOverride = material,
+            Position = position,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
+        };
+        return meshInstance;
+    }
+
+    private void UpdateMarkers(global::Maze.Model.Maze maze)
+    {
+        Cell startCell = maze.GetCell(0, 0);
+        Cell goalCell = maze.GetCell(maze.Width - 1, maze.Height - 1);
+        float markerScale = CellSize;
+
+        _startMarker.Scale = Vector3.One * markerScale;
+        _goalMarker.Scale = Vector3.One * markerScale;
+        _startMarker.Position = CellCenter(startCell);
+        _goalMarker.Position = CellCenter(goalCell);
+        _startMarkerLight.OmniRange = Mathf.Max(2f, CellSize * 2.4f);
+        _goalMarkerLight.OmniRange = Mathf.Max(2.4f, CellSize * 2.9f);
+        _startMarker.Visible = true;
+        _goalMarker.Visible = true;
+    }
+
+    private Vector3 CellCenter(Cell cell) =>
+        new(cell.X * CellSize + CellSize / 2f, 0f, cell.Y * CellSize + CellSize / 2f);
+
+    private void AnimateMarkers(float delta)
+    {
+        if (!_startMarker.Visible && !_goalMarker.Visible)
+        {
+            return;
+        }
+
+        _markerAnimationTime += delta;
+
+        float startBob = 0.04f * Mathf.Sin(_markerAnimationTime * 1.9f);
+        _startMarkerAccent.Position = new Vector3(0f, startBob, 0f);
+        _startMarkerAccent.RotateY(delta * 0.75f);
+
+        float goalBob = 0.06f * Mathf.Sin(_markerAnimationTime * 2.4f + 0.8f);
+        _goalMarkerAccent.Position = new Vector3(0f, goalBob, 0f);
+        _goalMarkerAccent.RotateY(-delta * 1.1f);
     }
 
     private Transform3D HorizontalWallTransform(float centerX, float centerZ) =>
