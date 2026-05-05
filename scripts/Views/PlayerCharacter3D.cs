@@ -13,6 +13,7 @@ namespace Maze.Views;
 public partial class PlayerCharacter3D : Node3D
 {
     [Signal] public delegate void GoalReachedEventHandler();
+    [Signal] public delegate void CellVisitedEventHandler(int x, int y);
 
     [Export] public float MoveSpeed = 4f;
     [Export] public float StandHeight = 0f;
@@ -81,6 +82,7 @@ public partial class PlayerCharacter3D : Node3D
 
         Position = _waypoints[0];
         Visible = true;
+    EmitSignal(SignalName.CellVisited, path[0].X, path[0].Y);
         _currentIndex = 1;
         _isMoving = _waypoints.Count > 1;
 
@@ -106,6 +108,7 @@ public partial class PlayerCharacter3D : Node3D
         Position = CellToWorld(start);
         Visible = true;
         CurrentMode = Mode.Manual;
+        EmitSignal(SignalName.CellVisited, start.X, start.Y);
     }
 
     public void DisableManualMode()
@@ -148,13 +151,14 @@ public partial class PlayerCharacter3D : Node3D
 
         Vector3 target = _waypoints[_currentIndex];
         Vector3 toTarget = target - Position;
-    FaceMovementDirection(toTarget);
+        FaceMovementDirection(toTarget);
         float remaining = toTarget.Length();
         float step = MoveSpeed * _cellSize * (float)delta;
 
         if (step >= remaining)
         {
             Position = target;
+            EmitSignal(SignalName.CellVisited, WorldToCell(target).X, WorldToCell(target).Y);
             _currentIndex++;
             if (_currentIndex >= _waypoints.Count)
             {
@@ -192,6 +196,7 @@ public partial class PlayerCharacter3D : Node3D
                 _isAnimatingCell = false;
                 _figure?.SetWalking(false);
                 Position = _animTo;
+                EmitSignal(SignalName.CellVisited, _manualCell.X, _manualCell.Y);
                 if (_manualCell == _manualGoal)
                 {
                     CurrentMode = Mode.Idle;
@@ -230,6 +235,11 @@ public partial class PlayerCharacter3D : Node3D
 
     private Vector3 CellToWorld(Cell cell) =>
         new(cell.X * _cellSize + _cellSize / 2f, StandHeight, cell.Y * _cellSize + _cellSize / 2f);
+
+    private Vector2I WorldToCell(Vector3 position) =>
+        new(
+            Mathf.RoundToInt((position.X - _cellSize / 2f) / _cellSize),
+            Mathf.RoundToInt((position.Z - _cellSize / 2f) / _cellSize));
 
     private void FaceMovementDirection(Vector3 movement)
     {

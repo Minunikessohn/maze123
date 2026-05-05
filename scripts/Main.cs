@@ -80,6 +80,7 @@ public partial class Main : Node
         _hud.ExploreModeToggle += OnExploreModeToggled;
         _hud.UnboundedModeChanged += OnUnboundedModeChanged;
         _player.GoalReached += OnBotGoalReached;
+        _player.CellVisited += OnPlayerCellVisited;
 
         _runner.GenerationStepProduced += OnGenerationStepProduced;
         _runner.GenerationFinished += OnGenerationFinished;
@@ -123,6 +124,7 @@ public partial class Main : Node
         _runner.StopAll();
         _solverPath.Clear();
         _player.Hide();
+        _view3D.ClearTrail();
         ResetExploreMode();
         _view3D.GetNode<CameraController3D>("Camera3D").DisableFollow();
         _currentMaze = new global::Maze.Model.Maze(width, height);
@@ -195,6 +197,7 @@ public partial class Main : Node
         _currentMaze.ResetSolverState();
         _solverPath.Clear();
         _player.Hide();
+        _view3D.ClearTrail();
         ResetExploreMode();
         _view3D.GetNode<CameraController3D>("Camera3D").DisableFollow();
         _solverStart = _currentMaze.GetCell(0, 0);
@@ -297,6 +300,7 @@ public partial class Main : Node
         _runner.StopAll();
         _solverPath.Clear();
         _player.Hide();
+        _view3D.ClearTrail();
         ResetExploreMode();
         _view3D.GetNode<CameraController3D>("Camera3D").DisableFollow();
 
@@ -388,6 +392,11 @@ public partial class Main : Node
         GD.Print("[Main] Bot ist am Ziel angekommen.");
     }
 
+    private void OnPlayerCellVisited(int x, int y)
+    {
+        _view3D.MarkTrailCell(x, y);
+    }
+
     private void OnPlayManualToggle(bool active)
     {
         if (active)
@@ -411,6 +420,7 @@ public partial class Main : Node
         _runner.StopAll();
         _solverPath.Clear();
         _currentMaze.ResetSolverState();
+        _view3D.ClearTrail();
         _solverStart = _currentMaze.GetCell(0, 0);
         _solverGoal = _currentMaze.GetCell(_currentMaze.Width - 1, _currentMaze.Height - 1);
         _solverStart.State = CellState.Start;

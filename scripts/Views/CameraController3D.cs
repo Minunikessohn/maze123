@@ -168,7 +168,7 @@ public partial class CameraController3D : Camera3D
 
         if (@event is InputEventMouseMotion motion && _mouseLook)
         {
-            _yaw += motion.Relative.X * MouseSensitivity;
+            _yaw -= motion.Relative.X * MouseSensitivity;
             _pitch = Mathf.Clamp(_pitch - motion.Relative.Y * MouseSensitivity, -1.4f, 1.4f);
         }
     }

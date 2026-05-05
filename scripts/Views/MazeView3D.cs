@@ -1,5 +1,6 @@
 ﻿#nullable enable
 
+using System.Collections.Generic;
 using Godot;
 using Maze.Model;
 
@@ -28,6 +29,7 @@ public partial class MazeView3D : Node3D
     private MeshInstance3D _floor = null!;
     private MultiMeshInstance3D _wallsHorizontal = null!;
     private MultiMeshInstance3D _wallsVertical = null!;
+    private MultiMeshInstance3D _trail = null!;
     private Node3D _startMarker = null!;
     private Node3D _goalMarker = null!;
     private Node3D _startMarkerAccent = null!;
@@ -37,6 +39,8 @@ public partial class MazeView3D : Node3D
     private bool _exploreTarget;
     private float _exploreFactor;
     private float _markerAnimationTime;
+    private readonly List<Vector2I> _trailCells = new();
+    private readonly HashSet<Vector2I> _trailCellSet = new();
 
     private const float DaySunEnergy = 1.0f;
     private const float DayAmbientEnergy = 0.4f;
@@ -84,6 +88,16 @@ public partial class MazeView3D : Node3D
         AlbedoColor = new Color("#2c2c2c")
     };
 
+    private static readonly StandardMaterial3D TrailMaterial = new()
+    {
+        AlbedoColor = new Color("#4ecdc4"),
+        EmissionEnabled = true,
+        Emission = new Color("#4ecdc4"),
+        EmissionEnergyMultiplier = 0.65f,
+        Metallic = 0.05f,
+        Roughness = 0.2f
+    };
+
     private global::Maze.Model.Maze? _maze;
 
     public override void _Ready()
@@ -96,6 +110,7 @@ public partial class MazeView3D : Node3D
         _floor = GetNode<MeshInstance3D>("Floor");
         _wallsHorizontal = GetNode<MultiMeshInstance3D>("WallContainer/WallsHorizontal");
         _wallsVertical = GetNode<MultiMeshInstance3D>("WallContainer/WallsVertical");
+        InitializeTrail();
         InitializeMarkers();
 
         _wallsHorizontal.MaterialOverride = WallMaterial;
@@ -135,6 +150,7 @@ public partial class MazeView3D : Node3D
         _maze = null;
         _floor.Mesh = null;
         ResetMultiMeshes();
+        ClearTrail();
         _startMarker.Visible = false;
         _goalMarker.Visible = false;
     }
@@ -146,6 +162,30 @@ public partial class MazeView3D : Node3D
         {
             Rebuild();
         }
+    }
+
+    public void MarkTrailCell(int x, int y)
+    {
+        if (_maze is null || x < 0 || y < 0 || x >= _maze.Width || y >= _maze.Height)
+        {
+            return;
+        }
+
+        Vector2I cell = new(x, y);
+        if (!_trailCellSet.Add(cell))
+        {
+            return;
+        }
+
+        _trailCells.Add(cell);
+        RebuildTrail();
+    }
+
+    public void ClearTrail()
+    {
+        _trailCells.Clear();
+        _trailCellSet.Clear();
+        RebuildTrail();
     }
 
     private void Rebuild()
@@ -160,6 +200,7 @@ public partial class MazeView3D : Node3D
         BuildFloor(_maze);
         BuildWalls(_maze);
         UpdateMarkers(_maze);
+        RebuildTrail();
     }
 
     private void ResetMultiMeshes()
@@ -230,6 +271,22 @@ public partial class MazeView3D : Node3D
     {
         _wallsHorizontal.Multimesh.Mesh = new BoxMesh { Size = new Vector3(CellSize, WallHeight, WallThickness) };
         _wallsVertical.Multimesh.Mesh = new BoxMesh { Size = new Vector3(WallThickness, WallHeight, CellSize) };
+    }
+
+    private void InitializeTrail()
+    {
+        _trail = new MultiMeshInstance3D
+        {
+            Name = "Trail"
+        };
+        _trail.Multimesh = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D
+        };
+        _trail.MaterialOverride = TrailMaterial;
+        AddChild(_trail);
+        MoveChild(_trail, GetChildCount() - 1);
+        RebuildTrail();
     }
 
     private void InitializeMarkers()
@@ -403,6 +460,36 @@ public partial class MazeView3D : Node3D
 
     private Vector3 CellCenter(Cell cell) =>
         new(cell.X * CellSize + CellSize / 2f, 0f, cell.Y * CellSize + CellSize / 2f);
+
+    private void RebuildTrail()
+    {
+        if (_trail is null)
+        {
+            return;
+        }
+
+        MultiMesh trailMesh = _trail.Multimesh;
+        if (_maze is null || _trailCells.Count == 0)
+        {
+            trailMesh.InstanceCount = 0;
+            trailMesh.VisibleInstanceCount = 0;
+            return;
+        }
+
+        trailMesh.Mesh = new BoxMesh
+        {
+            Size = new Vector3(CellSize * 0.42f, 0.035f, CellSize * 0.42f)
+        };
+        trailMesh.InstanceCount = _trailCells.Count;
+        trailMesh.VisibleInstanceCount = _trailCells.Count;
+
+        for (int index = 0; index < _trailCells.Count; index++)
+        {
+            Vector2I cell = _trailCells[index];
+            Vector3 center = new(cell.X * CellSize + CellSize / 2f, 0.02f, cell.Y * CellSize + CellSize / 2f);
+            trailMesh.SetInstanceTransform(index, new Transform3D(Basis.Identity, center));
+        }
+    }
 
     private void AnimateMarkers(float delta)
     {
