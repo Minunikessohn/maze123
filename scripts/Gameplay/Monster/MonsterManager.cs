@@ -21,6 +21,7 @@ public partial class MonsterManager : Node3D
     private DayNightController? _dayNightController;
     private MazeGameConfig? _config;
     private global::Maze.Model.Maze? _maze;
+    private Vector2I? _playerCell;
     private float _cellSize = 1f;
 
     public IReadOnlyList<Vector2I> ActiveMonsterCells => _activeMonsterCells;
@@ -95,6 +96,16 @@ public partial class MonsterManager : Node3D
         SpawnAll();
     }
 
+    public void UpdatePlayerCell(Vector2I? playerCell)
+    {
+        _playerCell = playerCell;
+
+        foreach (MonsterController monster in _activeMonsters)
+        {
+            monster.SetPlayerCell(playerCell);
+        }
+    }
+
     private void OnDayStarted() => Synchronize(false);
 
     private void OnNightStarted() => Synchronize(true);
@@ -120,6 +131,7 @@ public partial class MonsterManager : Node3D
             AddChild(monster);
             monster.CellChanged += OnMonsterCellChanged;
             monster.Configure(_maze!, spawnCell, _cellSize, _config?.MonsterCanBeStunned ?? false);
+            monster.SetPlayerCell(_playerCell);
             _monsterIndices[monster] = _activeMonsterCells.Count;
             _activeMonsterCells.Add(monster.CurrentCell);
             monster.ActivateMonster();

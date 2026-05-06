@@ -195,6 +195,7 @@ public partial class Main : Node
         _player.Hide();
         _view3D.ClearTrail();
         _view3D.ClearProximityEffects();
+        _monsterManager.UpdatePlayerCell(null);
         ResetExploreMode();
         _camera3D.DisableFollow();
         _currentMaze = new global::Maze.Model.Maze(sanitizedConfig.Width, sanitizedConfig.Height);
@@ -341,6 +342,7 @@ public partial class Main : Node
         _solverPath.Clear();
         _player.Hide();
         _view3D.ClearTrail();
+        _monsterManager.UpdatePlayerCell(null);
         ResetExploreMode();
         _camera3D.DisableFollow();
         _solverStart = ResolveStartCell(_currentMaze);
@@ -481,6 +483,7 @@ public partial class Main : Node
         _player.Hide();
         _view3D.ClearTrail();
         _view3D.ClearProximityEffects();
+        _monsterManager.UpdatePlayerCell(null);
         ResetExploreMode();
         _camera3D.DisableFollow();
         RefreshSaveSlots();
@@ -504,6 +507,7 @@ public partial class Main : Node
         _player.Hide();
         _view3D.ClearTrail();
         _view3D.ClearProximityEffects();
+        _monsterManager.UpdatePlayerCell(null);
         ResetExploreMode();
         _camera3D.DisableFollow();
 
@@ -632,6 +636,7 @@ public partial class Main : Node
 
     private void OnPlayerCellVisited(int x, int y)
     {
+        _monsterManager.UpdatePlayerCell(new Vector2I(x, y));
         _view3D.MarkTrailCell(x, y);
         _view3D.UpdateMonsterProximity(new Vector2I(x, y));
     }
@@ -720,6 +725,7 @@ public partial class Main : Node
         _isManualMode = false;
         _sessionState.IsManualMode = false;
         _view3D.ClearProximityEffects();
+        _monsterManager.UpdatePlayerCell(null);
 
         _camera3D.DisableFollow();
 

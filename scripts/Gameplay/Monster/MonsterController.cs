@@ -21,8 +21,10 @@ public partial class MonsterController : Node3D
     [Export] public float StandHeight { get; set; } = 0.28f;
     [Export] public float MoveSpeedCellsPerSecond { get; set; } = 1.35f;
     [Export] public float PauseBetweenMoves { get; set; } = 0.3f;
+    [Export] public int MaxSightRangeCells { get; set; } = 13;
 
     private global::Maze.Model.Maze? _maze;
+    private Vector2I? _playerCell;
     private float _cellSize = 1f;
     private float _hoverTime;
     private float _pauseElapsed;
@@ -37,6 +39,8 @@ public partial class MonsterController : Node3D
     public Vector2I SpawnCell { get; private set; }
     public Vector2I CurrentCell { get; private set; }
     public bool CanBeStunned { get; private set; }
+    public bool CanSeePlayerNow { get; private set; }
+    public Vector2I? LastSeenPlayerCell { get; private set; }
     public MonsterState CurrentState { get; private set; } = MonsterState.Idle;
     public event Action<MonsterController, Vector2I>? CellChanged;
 
@@ -49,6 +53,7 @@ public partial class MonsterController : Node3D
     public override void _Process(double delta)
     {
         _hoverTime += (float)delta * HoverSpeed;
+        UpdatePlayerVisibility();
 
         if (_isMoving)
         {
@@ -82,6 +87,12 @@ public partial class MonsterController : Node3D
         _previousCell = null;
         _basePosition = CellToWorld(spawnCell);
         Position = _basePosition;
+    }
+
+    public void SetPlayerCell(Vector2I? playerCell)
+    {
+        _playerCell = playerCell;
+        UpdatePlayerVisibility();
     }
 
     public void ActivateMonster()
@@ -174,6 +185,86 @@ public partial class MonsterController : Node3D
         Vector3 position = _basePosition;
         position.Y += Mathf.Sin(_hoverTime) * HoverAmplitude;
         Position = position;
+    }
+
+    private void UpdatePlayerVisibility()
+    {
+        if (_playerCell is not Vector2I playerCell || _maze is null)
+        {
+            CanSeePlayerNow = false;
+            return;
+        }
+
+        CanSeePlayerNow = CanSeePlayer(CurrentCell, playerCell, MaxSightRangeCells);
+        if (!CanSeePlayerNow)
+        {
+            return;
+        }
+
+        LastSeenPlayerCell = playerCell;
+        if (!_isMoving)
+        {
+            FaceMovementDirection(CellToWorld(playerCell) - _basePosition);
+        }
+    }
+
+    private bool CanSeePlayer(Vector2I monsterCell, Vector2I playerCell, int maxRangeCells)
+    {
+        if (_maze is null)
+        {
+            return false;
+        }
+
+        return CanSeePlayer(_maze, monsterCell, playerCell, maxRangeCells);
+    }
+
+    private static bool CanSeePlayer(global::Maze.Model.Maze maze, Vector2I monsterCell, Vector2I playerCell, int maxRangeCells)
+    {
+        if (!maze.IsInside(monsterCell.X, monsterCell.Y) || !maze.IsInside(playerCell.X, playerCell.Y))
+        {
+            return false;
+        }
+
+        if (monsterCell == playerCell)
+        {
+            return true;
+        }
+
+        int clampedRange = Math.Max(0, maxRangeCells);
+        Dictionary<Vector2I, int> distances = new() { [monsterCell] = 0 };
+        Queue<Vector2I> frontier = new();
+        frontier.Enqueue(monsterCell);
+
+        while (frontier.Count > 0)
+        {
+            Vector2I current = frontier.Dequeue();
+            int currentDistance = distances[current];
+            if (currentDistance >= clampedRange)
+            {
+                continue;
+            }
+
+            Cell currentCell = maze.GetCell(current.X, current.Y);
+            foreach (Cell neighbor in GetReachableNeighbors(maze, currentCell))
+            {
+                Vector2I neighborCell = new(neighbor.X, neighbor.Y);
+                if (distances.ContainsKey(neighborCell))
+                {
+                    continue;
+                }
+
+                int nextDistance = currentDistance + 1;
+                if (neighborCell == playerCell)
+                {
+                    return nextDistance <= clampedRange;
+                }
+
+                distances[neighborCell] = nextDistance;
+                frontier.Enqueue(neighborCell);
+            }
+        }
+
+        return false;
     }
 
     private static List<Cell> GetReachableNeighbors(global::Maze.Model.Maze maze, Cell cell)
