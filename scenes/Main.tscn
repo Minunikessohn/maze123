@@ -1,13 +1,16 @@
-[gd_scene load_steps=6 format=3 uid="uid://b0maze0main"]
+[gd_scene load_steps=7 format=3 uid="uid://b0maze0main"]
 
 [ext_resource type="Script" path="res://scripts/Main.cs" id="1_main"]
 [ext_resource type="PackedScene" uid="uid://b0maze0hud" path="res://scenes/Hud.tscn" id="2_hud"]
 [ext_resource type="PackedScene" path="res://scenes/MazeView2D.tscn" id="3_view2d"]
 [ext_resource type="Script" path="res://scripts/AlgorithmRunner.cs" id="4_runner"]
 [ext_resource type="PackedScene" path="res://scenes/MazeView3D.tscn" id="5_view3d"]
+[ext_resource type="PackedScene" path="res://scenes/MainMenu.tscn" id="6_mainmenu"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1_main")
+
+[node name="MainMenu" parent="." instance=ExtResource("6_mainmenu")]
 
 [node name="MazeView2D" parent="." instance=ExtResource("3_view2d")]
 

@@ -1,0 +1,21 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/UI/SaveListPanel.cs" id="1_savelist"]
+
+[node name="SaveListPanel" type="VBoxContainer"]
+script = ExtResource("1_savelist")
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="EmptyLabel" type="Label" parent="."]
+text = "Noch keine gespeicherten Labyrinthe vorhanden."
+autowrap_mode = 3
+
+[node name="SaveList" type="ItemList" parent="."]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+select_mode = 0
+
+[node name="SelectionLabel" type="Label" parent="."]
+text = "Kein Save ausgewaehlt."

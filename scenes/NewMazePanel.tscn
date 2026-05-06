@@ -1,0 +1,82 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/UI/NewMazePanel.cs" id="1_newmaze"]
+
+[node name="NewMazePanel" type="VBoxContainer"]
+script = ExtResource("1_newmaze")
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="Basics" type="GridContainer" parent="."]
+columns = 4
+
+[node name="SaveNameLabel" type="Label" parent="Basics"]
+text = "Save-Name"
+
+[node name="SaveNameEdit" type="LineEdit" parent="Basics"]
+placeholder_text = "maze-save"
+
+[node name="WidthLabel" type="Label" parent="Basics"]
+text = "Breite"
+
+[node name="WidthSpinBox" type="SpinBox" parent="Basics"]
+custom_minimum_size = Vector2(110, 0)
+
+[node name="HeightLabel" type="Label" parent="Basics"]
+text = "Hoehe"
+
+[node name="HeightSpinBox" type="SpinBox" parent="Basics"]
+custom_minimum_size = Vector2(110, 0)
+
+[node name="GeneratorLabel" type="Label" parent="Basics"]
+text = "Algorithmus"
+
+[node name="GeneratorChooser" type="OptionButton" parent="Basics"]
+size_flags_horizontal = 3
+
+[node name="SeedLabel" type="Label" parent="Basics"]
+text = "Seed"
+
+[node name="SeedSpinBox" type="SpinBox" parent="Basics"]
+custom_minimum_size = Vector2(180, 0)
+
+[node name="Options" type="GridContainer" parent="."]
+columns = 2
+theme_override_constants/h_separation = 16
+theme_override_constants/v_separation = 10
+
+[node name="SandboxModeToggle" type="CheckBox" parent="Options"]
+text = "Sandbox-Modus"
+
+[node name="PathGlowToggle" type="CheckBox" parent="Options"]
+text = "Leuchtender Weg"
+
+[node name="DarkModeToggle" type="CheckBox" parent="Options"]
+text = "Dunkelmodus"
+
+[node name="TrapGenerationToggle" type="CheckBox" parent="Options"]
+text = "Fallen generieren"
+
+[node name="MonsterStunToggle" type="CheckBox" parent="Options"]
+text = "Monster koennen gestunnt werden"
+
+[node name="MonsterGenerationToggle" type="CheckBox" parent="Options"]
+text = "Monster generieren"
+
+[node name="DayNightCycleToggle" type="CheckBox" parent="Options"]
+text = "Tag-Nacht-Zyklus"
+
+[node name="NightView" type="HBoxContainer" parent="."]
+theme_override_constants/separation = 12
+
+[node name="NightViewDistanceLabel" type="Label" parent="NightView"]
+text = "Naechtliche Sichtbegrenzung"
+
+[node name="NightViewDistanceSpinBox" type="SpinBox" parent="NightView"]
+custom_minimum_size = Vector2(110, 0)
+
+[node name="MonsterNightRuleLabel" type="Label" parent="NightView"]
+size_flags_horizontal = 3
+autowrap_mode = 3
+text = "Monster erscheinen spaeter nur nachts."

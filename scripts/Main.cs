@@ -6,6 +6,7 @@ using Godot;
 using Maze.Game;
 using Maze.Generators;
 using Maze.Model;
+using Maze.Save;
 using Maze.Solvers;
 using Maze.UI;
 using Maze.Views;
@@ -17,17 +18,20 @@ public partial class Main : Node
     private const float DefaultStepsPerSecond = 30f;
     private const float MaxSimulationSpeed = 100001f;
 
+    private MainMenu _mainMenu = null!;
     private Hud _hud = null!;
     private StatsPanel _stats = null!;
     private MazeView2D _view2D = null!;
     private MazeView3D _view3D = null!;
     private PlayerCharacter3D _player = null!;
     private AlgorithmRunner _runner = null!;
+    private SaveGameService _saveGameService = null!;
     private global::Maze.Model.Maze? _currentMaze;
     private global::Maze.Model.Maze? _lastMazeBuiltFor3D;
     private Cell _solverStart = null!;
     private Cell _solverGoal = null!;
     private readonly List<Cell> _solverPath = new();
+    private readonly MazeSerializer _mazeSerializer = new();
 
     private readonly Dictionary<string, IMazeGenerator> _generators = new()
     {
@@ -57,18 +61,26 @@ public partial class Main : Node
     private bool _followCamEnabledBeforeManual;
     private bool _isManualMode;
     private double _manualStartTimeSeconds;
+    private string _pendingSaveDisplayName = string.Empty;
 
     public override void _Ready()
     {
+        _mainMenu = GetNode<MainMenu>("MainMenu");
         _hud = GetNode<Hud>("Hud");
         _stats = GetNode<StatsPanel>("Hud/StatsPanel");
         _view2D = GetNode<MazeView2D>("MazeView2D");
         _view3D = GetNode<MazeView3D>("MazeView3D");
         _player = GetNode<PlayerCharacter3D>("MazeView3D/Player");
         _runner = GetNode<AlgorithmRunner>("Runner");
+        _saveGameService = new SaveGameService();
 
-        _view2D.Visible = true;
-        _view3D.Visible = false;
+        _mainMenu.StartNewMazeRequested += OnStartNewMazeRequested;
+        _mainMenu.LoadMazeRequested += OnLoadMazeRequested;
+        _mainMenu.DeleteMazeRequested += OnDeleteMazeRequested;
+        _mainMenu.SetGeneratorOptions(BuildGeneratorMenuItems());
+        RefreshSaveSlots();
+
+        ShowMainMenu();
 
         _hud.GenerateRequested += OnGenerateRequested;
         _hud.SolveRequested += OnSolveRequested;
@@ -115,19 +127,20 @@ public partial class Main : Node
 
     private void OnGenerateRequested(int width, int height, string generatorId)
     {
-        StartNewGame(MazeGameConfig.CreateDefault(width, height, generatorId));
+        _pendingSaveDisplayName = string.Empty;
+        _ = StartNewGame(MazeGameConfig.CreateDefault(width, height, generatorId));
     }
 
-    private void StartNewGame(MazeGameConfig config)
+    private bool StartNewGame(MazeGameConfig config)
     {
-        OnStopManualRequested();
+        StopManualMode(force: true);
 
         MazeGameConfig sanitizedConfig = config.Clone().Sanitize();
 
         if (!_generators.TryGetValue(sanitizedConfig.GeneratorId, out IMazeGenerator? generator))
         {
             GD.PrintErr($"Unbekannter Generator: {sanitizedConfig.GeneratorId}");
-            return;
+            return false;
         }
 
         _currentGameConfig = sanitizedConfig;
@@ -148,6 +161,50 @@ public partial class Main : Node
 
         _runner.StartGeneration(generator.Generate(_currentMaze, _random));
         GD.Print($"[Main] Generator {generator.Name} gestartet.");
+        return true;
+    }
+
+    private void OnStartNewMazeRequested(string saveName, MazeGameConfig config)
+    {
+        _pendingSaveDisplayName = saveName;
+
+        if (!StartNewGame(config))
+        {
+            _pendingSaveDisplayName = string.Empty;
+            return;
+        }
+
+        ShowGameplay();
+    }
+
+    private void OnLoadMazeRequested(string saveId)
+    {
+        MazeSaveData? saveData = _saveGameService.LoadMaze(saveId);
+        if (saveData is null)
+        {
+            GD.PrintErr($"[Main] Save konnte nicht geladen werden: {saveId}");
+            RefreshSaveSlots();
+            return;
+        }
+
+        if (!TryLoadMaze(saveData))
+        {
+            return;
+        }
+
+        ShowGameplay();
+    }
+
+    private void OnDeleteMazeRequested(string saveId)
+    {
+        if (!_saveGameService.DeleteMaze(saveId))
+        {
+            GD.PrintErr($"[Main] Save konnte nicht geloescht werden: {saveId}");
+            return;
+        }
+
+        RefreshSaveSlots();
+        GD.Print($"[Main] Save geloescht: {saveId}");
     }
 
     private void OnGenerationStepProduced()
@@ -189,15 +246,29 @@ public partial class Main : Node
         _sessionState.IsRunning = true;
         _sessionState.IsPaused = false;
         _sessionState.GoalReached = false;
-        _sessionState.StartCell = null;
-        _sessionState.GoalCell = null;
+        _sessionState.StartCell = _currentMaze.GetCell(0, 0);
+        _sessionState.GoalCell = _currentMaze.GetCell(_currentMaze.Width - 1, _currentMaze.Height - 1);
         _tracker.Stop();
         _stats.UpdateStats(_tracker.Elapsed, _tracker.Steps, _tracker.VisitedCells, 0, _tracker.ManagedMemoryDeltaBytes);
+        TrySaveCurrentMaze();
+
+        if (!IsSandboxMode())
+        {
+            OnPlayManualRequested();
+            EnforceNormalModeView();
+        }
+
         GD.Print("[Main] Generator fertig.");
     }
 
     private void OnSolveRequested(string solverId)
     {
+        if (!IsSandboxMode())
+        {
+            GD.Print("[Main] Solver im normalen Modus deaktiviert.");
+            return;
+        }
+
         OnStopManualRequested();
 
         if (_currentMaze is null)
@@ -219,8 +290,8 @@ public partial class Main : Node
         _view3D.ClearTrail();
         ResetExploreMode();
         _view3D.GetNode<CameraController3D>("Camera3D").DisableFollow();
-        _solverStart = _currentMaze.GetCell(0, 0);
-        _solverGoal = _currentMaze.GetCell(_currentMaze.Width - 1, _currentMaze.Height - 1);
+        _solverStart = ResolveStartCell(_currentMaze);
+        _solverGoal = ResolveGoalCell(_currentMaze);
         _sessionState.StartCell = _solverStart;
         _sessionState.GoalCell = _solverGoal;
         _sessionState.GoalReached = false;
@@ -321,6 +392,12 @@ public partial class Main : Node
 
     private void OnResetRequested()
     {
+        if (!IsSandboxMode())
+        {
+            GD.Print("[Main] Reset ueber HUD ist im normalen Modus deaktiviert.");
+            return;
+        }
+
         OnStopManualRequested();
         _runner.StopAll();
         _solverPath.Clear();
@@ -346,6 +423,11 @@ public partial class Main : Node
 
     private void OnViewToggled(bool use3D)
     {
+        if (!IsSandboxMode())
+        {
+            use3D = true;
+        }
+
         if (_isManualMode && !use3D)
         {
             _hud.SetUse3DActive(true);
@@ -368,12 +450,22 @@ public partial class Main : Node
 
     private void OnHeatmapToggled(bool enabled)
     {
+        if (!IsSandboxMode())
+        {
+            return;
+        }
+
         _view2D.ShowDistances = enabled;
         _view2D.Refresh();
     }
 
     private void OnExploreModeToggled(bool enabled)
     {
+        if (!IsSandboxMode())
+        {
+            return;
+        }
+
         _view3D.SetExploreMode(enabled);
     }
 
@@ -401,6 +493,14 @@ public partial class Main : Node
 
     private void OnUnboundedModeChanged(bool unbounded)
     {
+        if (!IsSandboxMode())
+        {
+            _userRequestedUnboundedMode = false;
+            _suppressViewRefresh = false;
+            ApplyEffectiveRunnerMode();
+            return;
+        }
+
         _userRequestedUnboundedMode = unbounded;
         _suppressViewRefresh = unbounded;
         ApplyEffectiveRunnerMode();
@@ -413,8 +513,17 @@ public partial class Main : Node
         if (_isManualMode)
         {
             double elapsed = Time.GetTicksMsec() / 1000.0 - _manualStartTimeSeconds;
-            _hud.ShowVictory(elapsed);
-            OnStopManualRequested();
+
+            if (IsSandboxMode())
+            {
+                _hud.ShowVictory(elapsed);
+                OnStopManualRequested();
+            }
+            else
+            {
+                GD.Print($"[Main] Ziel im normalen Modus erreicht nach {elapsed:0.00} s.");
+            }
+
             return;
         }
 
@@ -428,6 +537,16 @@ public partial class Main : Node
 
     private void OnPlayManualToggle(bool active)
     {
+        if (!IsSandboxMode())
+        {
+            if (!_isManualMode)
+            {
+                OnPlayManualRequested();
+            }
+
+            return;
+        }
+
         if (active)
         {
             OnPlayManualRequested();
@@ -450,8 +569,8 @@ public partial class Main : Node
         _solverPath.Clear();
         _currentMaze.ResetSolverState();
         _view3D.ClearTrail();
-        _solverStart = _currentMaze.GetCell(0, 0);
-        _solverGoal = _currentMaze.GetCell(_currentMaze.Width - 1, _currentMaze.Height - 1);
+        _solverStart = ResolveStartCell(_currentMaze);
+        _solverGoal = ResolveGoalCell(_currentMaze);
         _sessionState.StartCell = _solverStart;
         _sessionState.GoalCell = _solverGoal;
         _sessionState.GoalReached = false;
@@ -481,6 +600,16 @@ public partial class Main : Node
 
     private void OnStopManualRequested()
     {
+        StopManualMode(force: false);
+    }
+
+    private void StopManualMode(bool force)
+    {
+        if (!force && !IsSandboxMode() && _isManualMode)
+        {
+            return;
+        }
+
         if (!_isManualMode)
         {
             _hud.SetManualPlayActive(false);
@@ -527,4 +656,184 @@ public partial class Main : Node
 
     private static bool AreNeighbors(Cell a, Cell b) =>
         Math.Abs(a.X - b.X) + Math.Abs(a.Y - b.Y) == 1;
+
+    private void TrySaveCurrentMaze()
+    {
+        if (_currentMaze is null || _currentGameConfig is null || string.IsNullOrWhiteSpace(_pendingSaveDisplayName))
+        {
+            return;
+        }
+
+        try
+        {
+            MazeSaveData saveData = _mazeSerializer.CreateSaveData(
+                _pendingSaveDisplayName,
+                _currentGameConfig,
+                _currentMaze,
+                ResolveStartCell(_currentMaze),
+                ResolveGoalCell(_currentMaze),
+                _sessionState.ActiveTrapCells,
+                _sessionState.ActiveMonsterCells);
+
+            _saveGameService.SaveMaze(saveData);
+            RefreshSaveSlots();
+            GD.Print($"[Main] Save erstellt: {saveData.SaveId}");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[Main] Save konnte nicht erstellt werden: {ex.Message}");
+        }
+        finally
+        {
+            _pendingSaveDisplayName = string.Empty;
+        }
+    }
+
+    private bool TryLoadMaze(MazeSaveData saveData)
+    {
+        try
+        {
+            StopManualMode(force: true);
+            _runner.StopAll();
+            _solverPath.Clear();
+            _player.Hide();
+            _view3D.ClearTrail();
+            ResetExploreMode();
+            _view3D.GetNode<CameraController3D>("Camera3D").DisableFollow();
+
+            _currentGameConfig = saveData.Config.Clone().Sanitize();
+            _currentMaze = _mazeSerializer.DeserializeMaze(saveData);
+            _lastMazeBuiltFor3D = null;
+            _random = new Random(_currentGameConfig.Seed);
+
+            _sessionState.ResetForNewGame(_currentGameConfig, _currentMaze);
+            _sessionState.ActiveTrapCells.AddRange(ConvertTrapCells(saveData));
+            _sessionState.ActiveMonsterCells.AddRange(ConvertMonsterCells(saveData));
+            _sessionState.StartCell = ResolveSavePoint(_currentMaze, saveData.StartCell, 0, 0);
+            _sessionState.GoalCell = ResolveSavePoint(_currentMaze, saveData.GoalCell, _currentMaze.Width - 1, _currentMaze.Height - 1);
+            _sessionState.IsRunning = true;
+
+            _view2D.SetMaze(_currentMaze);
+            _view2D.ForceRefresh();
+            _view3D.SetMaze(_currentMaze);
+            _lastMazeBuiltFor3D = _currentMaze;
+
+            if (!IsSandboxMode())
+            {
+                OnPlayManualRequested();
+                EnforceNormalModeView();
+            }
+
+            GD.Print($"[Main] Save geladen: {saveData.SaveId}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[Main] Save konnte nicht geladen werden: {ex.Message}");
+            return false;
+        }
+    }
+
+    private void RefreshSaveSlots() =>
+        _mainMenu.SetSaveSlots(_saveGameService.ListSaves());
+
+    private Cell ResolveStartCell(global::Maze.Model.Maze maze) =>
+        ResolveSessionPoint(maze, _sessionState.StartCell, 0, 0);
+
+    private Cell ResolveGoalCell(global::Maze.Model.Maze maze) =>
+        ResolveSessionPoint(maze, _sessionState.GoalCell, maze.Width - 1, maze.Height - 1);
+
+    private static Cell ResolveSessionPoint(global::Maze.Model.Maze maze, Cell? sessionCell, int fallbackX, int fallbackY)
+    {
+        if (sessionCell is not null && maze.IsInside(sessionCell.X, sessionCell.Y))
+        {
+            return maze.GetCell(sessionCell.X, sessionCell.Y);
+        }
+
+        return maze.GetCell(fallbackX, fallbackY);
+    }
+
+    private static Cell ResolveSavePoint(global::Maze.Model.Maze maze, MazePointSaveData point, int fallbackX, int fallbackY)
+    {
+        if (maze.IsInside(point.X, point.Y))
+        {
+            return maze.GetCell(point.X, point.Y);
+        }
+
+        return maze.GetCell(fallbackX, fallbackY);
+    }
+
+    private static List<Vector2I> ConvertTrapCells(MazeSaveData saveData)
+    {
+        List<Vector2I> cells = new(saveData.Traps.Count);
+
+        foreach (TrapSaveData trap in saveData.Traps)
+        {
+            cells.Add(trap.Cell.ToVector2I());
+        }
+
+        return cells;
+    }
+
+    private static List<Vector2I> ConvertMonsterCells(MazeSaveData saveData)
+    {
+        List<Vector2I> cells = new(saveData.MonsterSpawnCells.Count);
+
+        foreach (MazePointSaveData point in saveData.MonsterSpawnCells)
+        {
+            cells.Add(point.ToVector2I());
+        }
+
+        return cells;
+    }
+
+    private List<KeyValuePair<string, string>> BuildGeneratorMenuItems()
+    {
+        List<KeyValuePair<string, string>> items = new(_generators.Count);
+
+        foreach (KeyValuePair<string, IMazeGenerator> generator in _generators)
+        {
+            items.Add(new KeyValuePair<string, string>(generator.Key, generator.Value.Name));
+        }
+
+        return items;
+    }
+
+    private void ShowMainMenu()
+    {
+        _mainMenu.Visible = true;
+        _hud.Visible = false;
+        _view2D.Visible = false;
+        _view3D.Visible = false;
+    }
+
+    private void ShowGameplay()
+    {
+        _mainMenu.Visible = false;
+        bool sandboxMode = IsSandboxMode();
+
+        _hud.Visible = sandboxMode;
+        _hud.SetUse3DActive(!sandboxMode);
+        _view2D.Visible = sandboxMode;
+        _view3D.Visible = !sandboxMode;
+        EnforceNormalModeView();
+    }
+
+    private bool IsSandboxMode() =>
+        _currentGameConfig?.SandboxModeEnabled ?? true;
+
+    private bool IsNormalMode() =>
+        !IsSandboxMode();
+
+    private void EnforceNormalModeView()
+    {
+        if (!IsNormalMode())
+        {
+            return;
+        }
+
+        _hud.Visible = false;
+        _view2D.Visible = false;
+        _view3D.Visible = true;
+    }
 }

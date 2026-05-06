@@ -11,6 +11,7 @@ public sealed class MazeGameConfig
     public int Width { get; set; } = 25;
     public int Height { get; set; } = 25;
     public string GeneratorId { get; set; } = "recursive-backtracker";
+    public bool SandboxModeEnabled { get; set; }
     public bool PathGlowEnabled { get; set; } = true;
     public bool DarkModeEnabled { get; set; }
     public bool TrapGenerationEnabled { get; set; }
@@ -38,6 +39,7 @@ public sealed class MazeGameConfig
             Width = Width,
             Height = Height,
             GeneratorId = GeneratorId,
+            SandboxModeEnabled = SandboxModeEnabled,
             PathGlowEnabled = PathGlowEnabled,
             DarkModeEnabled = DarkModeEnabled,
             TrapGenerationEnabled = TrapGenerationEnabled,

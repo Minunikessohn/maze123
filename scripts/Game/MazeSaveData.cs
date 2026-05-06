@@ -11,10 +11,10 @@ public sealed class MazeSaveData
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public MazeGameConfig Config { get; set; } = new();
     public List<MazeCellSaveData> Cells { get; set; } = new();
-    public Vector2I StartCell { get; set; } = Vector2I.Zero;
-    public Vector2I GoalCell { get; set; } = Vector2I.Zero;
-    public List<Vector2I> TrapCells { get; set; } = new();
-    public List<Vector2I> MonsterSpawnCells { get; set; } = new();
+    public MazePointSaveData StartCell { get; set; } = new();
+    public MazePointSaveData GoalCell { get; set; } = new();
+    public List<TrapSaveData> Traps { get; set; } = new();
+    public List<MazePointSaveData> MonsterSpawnCells { get; set; } = new();
 }
 
 public sealed class MazeCellSaveData
@@ -25,4 +25,30 @@ public sealed class MazeCellSaveData
     public bool EastWall { get; set; } = true;
     public bool SouthWall { get; set; } = true;
     public bool WestWall { get; set; } = true;
+}
+
+public sealed class MazePointSaveData
+{
+    public int X { get; set; }
+    public int Y { get; set; }
+
+    public MazePointSaveData()
+    {
+    }
+
+    public MazePointSaveData(int x, int y)
+    {
+        X = x;
+        Y = y;
+    }
+
+    public Vector2I ToVector2I() => new(X, Y);
+
+    public static MazePointSaveData FromVector2I(Vector2I point) => new(point.X, point.Y);
+}
+
+public sealed class TrapSaveData
+{
+    public string TrapId { get; set; } = "trap";
+    public MazePointSaveData Cell { get; set; } = new();
 }
