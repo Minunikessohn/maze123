@@ -8,6 +8,13 @@ using Maze.World;
 
 namespace Maze.Gameplay.Monster;
 
+public enum MonsterSimulationMode
+{
+    Inactive,
+    Frozen,
+    Active
+}
+
 public partial class MonsterManager : Node3D
 {
     private const string MonsterScenePath = "res://scenes/Monster.tscn";
@@ -16,6 +23,7 @@ public partial class MonsterManager : Node3D
     private readonly List<Vector2I> _activeMonsterCells = new();
     private readonly List<MonsterController> _activeMonsters = new();
     private readonly Dictionary<MonsterController, int> _monsterIndices = new();
+    private readonly HashSet<MonsterController> _stunOverlapMonsters = new();
 
     private PackedScene _monsterScene = null!;
     private DayNightController? _dayNightController;
@@ -80,20 +88,24 @@ public partial class MonsterManager : Node3D
         DespawnAll();
     }
 
-    public void Synchronize(bool shouldBeActive)
+    public void Synchronize(MonsterSimulationMode mode)
     {
-        if (!shouldBeActive || !CanSpawnMonsters())
+        if (mode == MonsterSimulationMode.Inactive || !CanSpawnMonsters())
         {
             DespawnAll();
             return;
         }
 
-        if (_activeMonsters.Count == _spawnCells.Count)
+        if (_activeMonsters.Count != _spawnCells.Count)
         {
-            return;
+            SpawnAll();
         }
 
-        SpawnAll();
+        bool shouldPauseSimulation = mode == MonsterSimulationMode.Frozen;
+        foreach (MonsterController monster in _activeMonsters)
+        {
+            monster.SetSimulationPaused(shouldPauseSimulation);
+        }
     }
 
     public void UpdatePlayerCell(Vector2I? playerCell)
@@ -106,48 +118,108 @@ public partial class MonsterManager : Node3D
         }
     }
 
-    public bool TryStunMonsterAtCell(Vector2I cell, float durationSeconds = -1f)
+    public bool TryStunClosestMonsterInRadius(Vector3 worldPosition, float radius, float durationSeconds = -1f)
     {
+        if (radius <= 0f)
+        {
+            return false;
+        }
+
+        MonsterController? closestMonster = null;
+        float maxDistanceSquared = radius * radius;
+        float closestDistanceSquared = maxDistanceSquared;
+
         foreach (MonsterController monster in _activeMonsters)
         {
-            if (monster.CurrentCell != cell)
+            float distanceSquared = worldPosition.DistanceSquaredTo(monster.StunAnchorGlobalPosition);
+            if (distanceSquared > closestDistanceSquared)
             {
                 continue;
             }
 
-            if (monster.TryStun(durationSeconds))
-            {
-                OnMonsterCellChanged(monster, monster.CurrentCell);
-                return true;
-            }
+            closestMonster = monster;
+            closestDistanceSquared = distanceSquared;
         }
 
-        return false;
+        if (closestMonster is null || !closestMonster.TryStun(durationSeconds))
+        {
+            return false;
+        }
+
+        OnMonsterCellChanged(closestMonster, closestMonster.CurrentCell);
+        return true;
     }
 
-    public int TryStunMonstersInCells(IEnumerable<Vector2I> cells, float durationSeconds = -1f)
+    public int TryStunMonstersInRadius(Vector3 worldPosition, float radius, float durationSeconds = -1f)
     {
-        HashSet<Vector2I> remainingCells = new(cells);
+        if (radius <= 0f)
+        {
+            return 0;
+        }
+
         int stunnedCount = 0;
+        float maxDistanceSquared = radius * radius;
 
         foreach (MonsterController monster in _activeMonsters)
         {
-            if (!remainingCells.Contains(monster.CurrentCell) || !monster.TryStun(durationSeconds))
+            if (worldPosition.DistanceSquaredTo(monster.StunAnchorGlobalPosition) > maxDistanceSquared)
+            {
+                continue;
+            }
+
+            if (!monster.TryStun(durationSeconds))
             {
                 continue;
             }
 
             OnMonsterCellChanged(monster, monster.CurrentCell);
-            remainingCells.Remove(monster.CurrentCell);
             stunnedCount++;
         }
 
         return stunnedCount;
     }
 
-    private void OnDayStarted() => Synchronize(false);
+    public int UpdateStunCollision(Vector3 worldPosition, float radius, float durationSeconds = -1f)
+    {
+        if (radius <= 0f)
+        {
+            _stunOverlapMonsters.Clear();
+            return 0;
+        }
 
-    private void OnNightStarted() => Synchronize(true);
+        HashSet<MonsterController> overlappingMonsters = new();
+        int stunnedCount = 0;
+        float maxDistanceSquared = radius * radius;
+
+        foreach (MonsterController monster in _activeMonsters)
+        {
+            if (worldPosition.DistanceSquaredTo(monster.StunAnchorGlobalPosition) > maxDistanceSquared)
+            {
+                continue;
+            }
+
+            overlappingMonsters.Add(monster);
+            if (_stunOverlapMonsters.Contains(monster) || !monster.TryStun(durationSeconds))
+            {
+                continue;
+            }
+
+            OnMonsterCellChanged(monster, monster.CurrentCell);
+            stunnedCount++;
+        }
+
+        _stunOverlapMonsters.Clear();
+        foreach (MonsterController monster in overlappingMonsters)
+        {
+            _stunOverlapMonsters.Add(monster);
+        }
+
+        return stunnedCount;
+    }
+
+    private void OnDayStarted() => Synchronize(MonsterSimulationMode.Inactive);
+
+    private void OnNightStarted() => Synchronize(MonsterSimulationMode.Active);
 
     private bool CanSpawnMonsters() =>
         _config is not null
@@ -192,6 +264,7 @@ public partial class MonsterManager : Node3D
         _monsterIndices.Clear();
         _activeMonsters.Clear();
         _activeMonsterCells.Clear();
+        _stunOverlapMonsters.Clear();
     }
 
     private void OnMonsterCellChanged(MonsterController monster, Vector2I cell)

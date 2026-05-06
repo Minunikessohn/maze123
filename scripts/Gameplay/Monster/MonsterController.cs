@@ -48,6 +48,7 @@ public partial class MonsterController : Node3D
     private float _moveElapsed;
     private float _moveDuration;
     private bool _isMoving;
+    private bool _simulationPaused;
     private float _idleElapsed;
     private float _searchElapsed;
     private float _stunElapsed;
@@ -63,6 +64,8 @@ public partial class MonsterController : Node3D
     public Vector2I? LastSeenPlayerCell { get; private set; }
     public MonsterState CurrentState { get; private set; } = MonsterState.Idle;
     public event Action<MonsterController, Vector2I>? CellChanged;
+
+    public Vector3 StunAnchorGlobalPosition => GlobalPosition;
 
     public override void _Ready()
     {
@@ -128,6 +131,7 @@ public partial class MonsterController : Node3D
         _moveElapsed = 0f;
         _moveDuration = 0f;
         _isMoving = false;
+        _simulationPaused = false;
         _idleElapsed = IdleDurationSeconds;
         _searchElapsed = 0f;
         _stunElapsed = 0f;
@@ -142,12 +146,19 @@ public partial class MonsterController : Node3D
     public void SetPlayerCell(Vector2I? playerCell)
     {
         _playerCell = playerCell;
+
+        if (CurrentState == MonsterState.Stunned || _simulationPaused)
+        {
+            return;
+        }
+
         UpdatePlayerVisibility();
     }
 
     public void ActivateMonster()
     {
         Visible = true;
+        _simulationPaused = false;
         SetProcess(true);
         _idleElapsed = IdleDurationSeconds;
         _pauseElapsed = 0f;
@@ -159,6 +170,7 @@ public partial class MonsterController : Node3D
     public void DeactivateMonster()
     {
         Visible = false;
+        _simulationPaused = false;
         SetProcess(false);
         _isMoving = false;
         _pauseElapsed = 0f;
@@ -167,6 +179,12 @@ public partial class MonsterController : Node3D
         _stunElapsed = 0f;
         SetCurrentState(MonsterState.Idle);
         Position = _basePosition;
+    }
+
+    public void SetSimulationPaused(bool paused)
+    {
+        _simulationPaused = paused;
+        SetProcess(Visible && !paused);
     }
 
     public bool TryStun(float durationSeconds = -1f)
@@ -192,6 +210,7 @@ public partial class MonsterController : Node3D
         _stunElapsed = effectiveDuration;
         CanSeePlayerNow = false;
         LastSeenPlayerCell = null;
+        CurrentCell = WorldToCell(Position);
         _basePosition = CellToWorld(CurrentCell);
         Position = _basePosition;
         SetCurrentState(MonsterState.Stunned);
@@ -610,6 +629,11 @@ public partial class MonsterController : Node3D
 
     private Vector3 CellToWorld(Vector2I cell) =>
         new(cell.X * _cellSize + _cellSize / 2f, StandHeight, cell.Y * _cellSize + _cellSize / 2f);
+
+    private Vector2I WorldToCell(Vector3 position) =>
+        new(
+            Mathf.RoundToInt((position.X - _cellSize / 2f) / _cellSize),
+            Mathf.RoundToInt((position.Z - _cellSize / 2f) / _cellSize));
 
     private void FaceMovementDirection(Vector3 movement)
     {

@@ -21,6 +21,7 @@ public partial class Main : Node
 {
     private const float DefaultStepsPerSecond = 30f;
     private const float MaxSimulationSpeed = 100001f;
+    private const float MonsterStunCollisionRadiusFactor = 0.45f;
 
     private MainMenu _mainMenu = null!;
     private PauseMenu _pauseMenu = null!;
@@ -138,6 +139,7 @@ public partial class Main : Node
         }
 
         SyncDayNightState();
+        UpdateMonsterStunCollision();
     }
 
     public override void _PhysicsProcess(double delta)
@@ -1017,15 +1019,18 @@ public partial class Main : Node
     {
         if (_currentGameConfig is null)
         {
-            _monsterManager.Synchronize(false);
+            _monsterManager.Synchronize(MonsterSimulationMode.Inactive);
+            _sessionState.ActiveMonsterCells.Clear();
             _view3D.SetMonsterCells(Array.Empty<Vector2I>());
             _view3D.ApplyDayNightState(false, false, MazeGameConfig.DefaultNightViewDistance, 0f, false);
             return;
         }
 
         _sessionState.DayNightProgress = _dayNightController.TimeOfDay;
-        _monsterManager.Synchronize(ShouldMonstersBeActive());
-        _view3D.SetMonsterCells(_monsterManager.ActiveMonsterCells);
+        _monsterManager.Synchronize(GetMonsterSimulationMode());
+        _sessionState.ActiveMonsterCells.Clear();
+        _sessionState.ActiveMonsterCells.AddRange(_monsterManager.ActiveMonsterCells);
+        _view3D.SetMonsterCells(_sessionState.ActiveMonsterCells);
         _view3D.ApplyDayNightState(
             _currentGameConfig.DayNightCycleEnabled,
             _currentGameConfig.DarkModeEnabled,
@@ -1034,14 +1039,41 @@ public partial class Main : Node
             _dayNightController.IsNight);
     }
 
-    private bool ShouldMonstersBeActive()
+    private void UpdateMonsterStunCollision()
+    {
+        if (_currentGameConfig is null
+            || !_currentGameConfig.MonsterCanBeStunned
+            || _flowState != GameFlowState.Playing
+            || !_player.Visible)
+        {
+            _monsterManager.UpdateStunCollision(Vector3.Zero, 0f);
+            return;
+        }
+
+        float collisionRadius = _view3D.CellSize * MonsterStunCollisionRadiusFactor;
+        _monsterManager.UpdateStunCollision(_player.GlobalPosition, collisionRadius);
+    }
+
+    private MonsterSimulationMode GetMonsterSimulationMode()
+    {
+        if (!ShouldMonstersBePresent())
+        {
+            return MonsterSimulationMode.Inactive;
+        }
+
+        return _flowState == GameFlowState.Paused
+            ? MonsterSimulationMode.Frozen
+            : MonsterSimulationMode.Active;
+    }
+
+    private bool ShouldMonstersBePresent()
     {
         if (_currentGameConfig is null || !_currentGameConfig.MonsterGenerationEnabled)
         {
             return false;
         }
 
-        if (_flowState != GameFlowState.Playing)
+        if (_flowState is not GameFlowState.Playing and not GameFlowState.Paused)
         {
             return false;
         }
