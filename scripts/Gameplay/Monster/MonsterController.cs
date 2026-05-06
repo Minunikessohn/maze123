@@ -12,6 +12,7 @@ public partial class MonsterController : Node3D
     public enum MonsterState
     {
         Idle,
+        Wander,
         Moving
     }
 
@@ -31,6 +32,7 @@ public partial class MonsterController : Node3D
     private float _moveElapsed;
     private float _moveDuration;
     private bool _isMoving;
+    private Vector2I? _previousCell;
 
     public Vector2I SpawnCell { get; private set; }
     public Vector2I CurrentCell { get; private set; }
@@ -77,6 +79,7 @@ public partial class MonsterController : Node3D
         _moveElapsed = 0f;
         _moveDuration = 0f;
         _isMoving = false;
+        _previousCell = null;
         _basePosition = CellToWorld(spawnCell);
         Position = _basePosition;
     }
@@ -85,6 +88,7 @@ public partial class MonsterController : Node3D
     {
         Visible = true;
         SetProcess(true);
+        CurrentState = MonsterState.Wander;
         CellChanged?.Invoke(this, CurrentCell);
     }
 
@@ -112,7 +116,7 @@ public partial class MonsterController : Node3D
         _isMoving = false;
         _moveElapsed = 0f;
         _pauseElapsed = 0f;
-        CurrentState = MonsterState.Idle;
+        CurrentState = MonsterState.Wander;
         _basePosition = _moveTargetPosition;
         CellChanged?.Invoke(this, CurrentCell);
     }
@@ -131,7 +135,8 @@ public partial class MonsterController : Node3D
             return;
         }
 
-        Cell nextCell = reachableNeighbors[GD.RandRange(0, reachableNeighbors.Count - 1)];
+        Cell nextCell = SelectWanderNeighbor(reachableNeighbors);
+        _previousCell = CurrentCell;
         CurrentCell = new Vector2I(nextCell.X, nextCell.Y);
         _moveStartPosition = _basePosition;
         _moveTargetPosition = CellToWorld(CurrentCell);
@@ -140,6 +145,28 @@ public partial class MonsterController : Node3D
         _isMoving = true;
         CurrentState = MonsterState.Moving;
         FaceMovementDirection(_moveTargetPosition - _moveStartPosition);
+    }
+
+    private Cell SelectWanderNeighbor(List<Cell> reachableNeighbors)
+    {
+        if (_previousCell is not Vector2I previousCell)
+        {
+            return reachableNeighbors[GD.RandRange(0, reachableNeighbors.Count - 1)];
+        }
+
+        List<Cell> forwardNeighbors = new();
+        foreach (Cell neighbor in reachableNeighbors)
+        {
+            if (neighbor.X == previousCell.X && neighbor.Y == previousCell.Y)
+            {
+                continue;
+            }
+
+            forwardNeighbors.Add(neighbor);
+        }
+
+        List<Cell> selectionPool = forwardNeighbors.Count > 0 ? forwardNeighbors : reachableNeighbors;
+        return selectionPool[GD.RandRange(0, selectionPool.Count - 1)];
     }
 
     private void ApplyHoverOffset()
