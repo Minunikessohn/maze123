@@ -1,0 +1,82 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/UI/PauseMenu.cs" id="1_pausemenu"]
+[ext_resource type="PackedScene" path="res://scenes/VisualSettingsPanel.tscn" id="2_visual"]
+[ext_resource type="PackedScene" path="res://scenes/AudioSettingsPanel.tscn" id="3_audio"]
+
+[node name="PauseMenu" type="Control"]
+script = ExtResource("1_pausemenu")
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Backdrop" type="ColorRect" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.45)
+
+[node name="Center" type="CenterContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Panel" type="PanelContainer" parent="Center"]
+custom_minimum_size = Vector2(760, 520)
+
+[node name="Margin" type="MarginContainer" parent="Center/Panel"]
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 24
+
+[node name="VBox" type="VBoxContainer" parent="Center/Panel/Margin"]
+theme_override_constants/separation = 14
+
+[node name="Title" type="Label" parent="Center/Panel/Margin/VBox"]
+text = "Pause-Menue"
+theme_override_font_sizes/font_size = 28
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="Center/Panel/Margin/VBox"]
+text = "Escape schliesst das Menue wieder und setzt das Labyrinth fort."
+autowrap_mode = 3
+horizontal_alignment = 1
+
+[node name="ModeButtons" type="HBoxContainer" parent="Center/Panel/Margin/VBox"]
+alignment = 1
+theme_override_constants/separation = 12
+
+[node name="VisualButton" type="Button" parent="Center/Panel/Margin/VBox/ModeButtons"]
+text = "Visuelles"
+toggle_mode = true
+button_pressed = true
+
+[node name="AudioButton" type="Button" parent="Center/Panel/Margin/VBox/ModeButtons"]
+text = "Ton"
+toggle_mode = true
+
+[node name="ModeTitle" type="Label" parent="Center/Panel/Margin/VBox"]
+text = "Visuelles"
+theme_override_font_sizes/font_size = 20
+horizontal_alignment = 1
+
+[node name="ModeDescription" type="Label" parent="Center/Panel/Margin/VBox"]
+text = "Passe Helligkeit, Sichtfeld und Effektstaerke waehrend des laufenden Labyrinths an."
+autowrap_mode = 3
+horizontal_alignment = 1
+
+[node name="Content" type="MarginContainer" parent="Center/Panel/Margin/VBox"]
+size_flags_vertical = 3
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_right = 12
+
+[node name="VisualSettingsPanel" parent="Center/Panel/Margin/VBox/Content" instance=ExtResource("2_visual")]
+
+[node name="AudioSettingsPanel" parent="Center/Panel/Margin/VBox/Content" instance=ExtResource("3_audio")]
+visible = false
+
+[node name="Actions" type="HBoxContainer" parent="Center/Panel/Margin/VBox"]
+alignment = 1
+
+[node name="ReturnToMainMenuButton" type="Button" parent="Center/Panel/Margin/VBox/Actions"]
+text = "Zurueck zum Startmenue"
+custom_minimum_size = Vector2(220, 44)

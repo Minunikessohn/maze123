@@ -242,6 +242,11 @@ public partial class CameraController3D : Camera3D
         }
     }
 
+    public void SetFieldOfView(float fieldOfView)
+    {
+        Fov = Mathf.Clamp(fieldOfView, 55f, 100f);
+    }
+
     private void UpdateFollowCamera(double delta)
     {
         if (_followTarget is null)

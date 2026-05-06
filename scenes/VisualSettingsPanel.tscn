@@ -1,0 +1,54 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/UI/VisualSettingsPanel.cs" id="1_visual"]
+
+[node name="VisualSettingsPanel" type="VBoxContainer"]
+script = ExtResource("1_visual")
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 16
+
+[node name="BrightnessRow" type="HBoxContainer" parent="."]
+theme_override_constants/separation = 12
+
+[node name="BrightnessLabel" type="Label" parent="BrightnessRow"]
+text = "Helligkeit"
+custom_minimum_size = Vector2(150, 0)
+
+[node name="BrightnessSlider" type="HSlider" parent="BrightnessRow"]
+size_flags_horizontal = 3
+
+[node name="BrightnessValueLabel" type="Label" parent="BrightnessRow"]
+text = "1.00x"
+custom_minimum_size = Vector2(70, 0)
+horizontal_alignment = 2
+
+[node name="FieldOfViewRow" type="HBoxContainer" parent="."]
+theme_override_constants/separation = 12
+
+[node name="FieldOfViewLabel" type="Label" parent="FieldOfViewRow"]
+text = "FOV"
+custom_minimum_size = Vector2(150, 0)
+
+[node name="FieldOfViewSlider" type="HSlider" parent="FieldOfViewRow"]
+size_flags_horizontal = 3
+
+[node name="FieldOfViewValueLabel" type="Label" parent="FieldOfViewRow"]
+text = "75"
+custom_minimum_size = Vector2(70, 0)
+horizontal_alignment = 2
+
+[node name="EffectsRow" type="HBoxContainer" parent="."]
+theme_override_constants/separation = 12
+
+[node name="EffectsLabel" type="Label" parent="EffectsRow"]
+text = "Effects"
+custom_minimum_size = Vector2(150, 0)
+
+[node name="EffectsSlider" type="HSlider" parent="EffectsRow"]
+size_flags_horizontal = 3
+
+[node name="EffectsValueLabel" type="Label" parent="EffectsRow"]
+text = "1.00x"
+custom_minimum_size = Vector2(70, 0)
+horizontal_alignment = 2

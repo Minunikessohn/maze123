@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using Godot;
 using Maze.Game;
+using Maze.Game.Settings;
 using Maze.Generators;
 using Maze.Model;
 using Maze.Save;
@@ -19,6 +20,7 @@ public partial class Main : Node
     private const float MaxSimulationSpeed = 100001f;
 
     private MainMenu _mainMenu = null!;
+    private PauseMenu _pauseMenu = null!;
     private Hud _hud = null!;
     private StatsPanel _stats = null!;
     private MazeView2D _view2D = null!;
@@ -68,6 +70,7 @@ public partial class Main : Node
     public override void _Ready()
     {
         _mainMenu = GetNode<MainMenu>("MainMenu");
+        _pauseMenu = GetNode<PauseMenu>("PauseMenu");
         _hud = GetNode<Hud>("Hud");
         _stats = GetNode<StatsPanel>("Hud/StatsPanel");
         _view2D = GetNode<MazeView2D>("MazeView2D");
@@ -81,6 +84,11 @@ public partial class Main : Node
         _mainMenu.LoadMazeRequested += OnLoadMazeRequested;
         _mainMenu.DeleteMazeRequested += OnDeleteMazeRequested;
         _mainMenu.SetGeneratorOptions(BuildGeneratorMenuItems());
+        _pauseMenu.VisualSettingsChanged += OnVisualSettingsChanged;
+        _pauseMenu.AudioSettingsChanged += OnAudioSettingsChanged;
+        _pauseMenu.ReturnToMainMenuRequested += OnReturnToMainMenuRequested;
+        _pauseMenu.SetVisualSettings(_sessionState.VisualSettings);
+        _pauseMenu.SetAudioSettings(_sessionState.AudioSettings);
         RefreshSaveSlots();
 
         _hud.GenerateRequested += OnGenerateRequested;
@@ -103,6 +111,8 @@ public partial class Main : Node
         _runner.SolverStepProduced += OnSolverStepProduced;
         _runner.SolverFinished += OnSolverFinished;
         ApplySimulationSpeed(DefaultStepsPerSecond);
+        ApplyVisualSettings(_sessionState.VisualSettings);
+        ApplyAudioSettings(_sessionState.AudioSettings);
         TransitionToState(GameFlowState.MainMenu);
 
         GD.Print("[Main] HUD, 2D-View und 3D-View verbunden.");
@@ -118,6 +128,14 @@ public partial class Main : Node
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (@event is InputEventKey { Pressed: true, Echo: false, Keycode: Key.Escape }
+            && _flowState is GameFlowState.Playing or GameFlowState.Paused)
+        {
+            TogglePauseMenu();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
         if (_flowState == GameFlowState.Paused
             && @event is InputEventKey { Pressed: true, Keycode: Key.Space }
             && _runner.IsPaused)
@@ -403,6 +421,35 @@ public partial class Main : Node
         TransitionToState(paused ? GameFlowState.Paused : GameFlowState.Playing);
     }
 
+    private void OnVisualSettingsChanged(VisualSettings settings)
+    {
+        _sessionState.VisualSettings.Brightness = settings.Brightness;
+        _sessionState.VisualSettings.FieldOfView = settings.FieldOfView;
+        _sessionState.VisualSettings.EffectsIntensity = settings.EffectsIntensity;
+        ApplyVisualSettings(_sessionState.VisualSettings);
+    }
+
+    private void OnAudioSettingsChanged(AudioSettings settings)
+    {
+        _sessionState.AudioSettings.MonsterVolume = settings.MonsterVolume;
+        _sessionState.AudioSettings.FootstepVolume = settings.FootstepVolume;
+        _sessionState.AudioSettings.GoalVolume = settings.GoalVolume;
+        _sessionState.AudioSettings.MasterVolume = settings.MasterVolume;
+        ApplyAudioSettings(_sessionState.AudioSettings);
+    }
+
+    private void OnReturnToMainMenuRequested()
+    {
+        StopManualMode(force: true);
+        _runner.StopAll();
+        _player.Hide();
+        _view3D.ClearTrail();
+        ResetExploreMode();
+        _camera3D.DisableFollow();
+        RefreshSaveSlots();
+        TransitionToState(GameFlowState.MainMenu);
+    }
+
     private void OnStepRequested() =>
         _runner.ForceSingleStep();
 
@@ -649,6 +696,19 @@ public partial class Main : Node
         _player.MoveSpeed = Mathf.Clamp(stepsPerSecond, 0.5f, MaxSimulationSpeed);
     }
 
+    private void ApplyVisualSettings(VisualSettings settings)
+    {
+        _view3D.ApplyBrightness(settings.Brightness);
+        _view3D.ApplyEffectsIntensity(settings.EffectsIntensity);
+        _camera3D.SetFieldOfView(settings.FieldOfView);
+        _pauseMenu.SetVisualSettings(settings);
+    }
+
+    private void ApplyAudioSettings(AudioSettings settings)
+    {
+        _pauseMenu.SetAudioSettings(settings);
+    }
+
     private void ResetExploreMode()
     {
         _hud.SetExploreModeActive(false);
@@ -665,6 +725,20 @@ public partial class Main : Node
     {
         bool runUnbounded = _userRequestedUnboundedMode || ShouldSkipInvisibleStepVisualization();
         _runner.Mode = runUnbounded ? AlgorithmRunner.RunMode.Unbounded : AlgorithmRunner.RunMode.Throttled;
+    }
+
+    private void TogglePauseMenu()
+    {
+        if (_flowState == GameFlowState.Playing)
+        {
+            TransitionToState(GameFlowState.Paused);
+            return;
+        }
+
+        if (_flowState == GameFlowState.Paused)
+        {
+            TransitionToState(GameFlowState.Playing);
+        }
     }
 
     private static bool AreNeighbors(Cell a, Cell b) =>
@@ -836,9 +910,11 @@ public partial class Main : Node
     {
         bool showMainMenu = _flowState == GameFlowState.MainMenu;
         bool showGameplay = _flowState is GameFlowState.Loading or GameFlowState.Playing or GameFlowState.Paused;
+        bool showPauseMenu = _flowState == GameFlowState.Paused;
         bool sandboxMode = IsSandboxMode();
 
         _mainMenu.Visible = showMainMenu;
+        _pauseMenu.Visible = showPauseMenu;
         _hud.Visible = showGameplay && sandboxMode;
         _hud.SetPauseActive(_flowState == GameFlowState.Paused);
 

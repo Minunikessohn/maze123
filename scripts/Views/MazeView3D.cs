@@ -38,6 +38,8 @@ public partial class MazeView3D : Node3D
     private OmniLight3D _goalMarkerLight = null!;
     private bool _exploreTarget;
     private float _exploreFactor;
+    private float _brightnessMultiplier = 1f;
+    private float _effectsIntensity = 1f;
     private float _markerAnimationTime;
     private readonly List<Vector2I> _trailCells = new();
     private readonly HashSet<Vector2I> _trailCellSet = new();
@@ -517,6 +519,23 @@ public partial class MazeView3D : Node3D
 
     public void SetExploreMode(bool enabled) => _exploreTarget = enabled;
 
+    public void ApplyBrightness(float brightness)
+    {
+        _brightnessMultiplier = Mathf.Clamp(brightness, 0.4f, 1.8f);
+        ApplyExploreFactor(_exploreFactor);
+    }
+
+    public void ApplyEffectsIntensity(float effectsIntensity)
+    {
+        _effectsIntensity = Mathf.Clamp(effectsIntensity, 0f, 1.5f);
+        StartMarkerMaterial.EmissionEnergyMultiplier = 1.7f * _effectsIntensity;
+        GoalMarkerMaterial.EmissionEnergyMultiplier = 1.95f * _effectsIntensity;
+        TrailMaterial.EmissionEnergyMultiplier = 0.65f * _effectsIntensity;
+        _startMarkerLight.LightEnergy = 0.85f * Mathf.Max(0.1f, _effectsIntensity);
+        _goalMarkerLight.LightEnergy = 1.05f * Mathf.Max(0.1f, _effectsIntensity);
+        ApplyExploreFactor(_exploreFactor);
+    }
+
     private void ApplyExploreFactor(float factor)
     {
         Environment? environment = _worldEnvironment.Environment;
@@ -526,11 +545,11 @@ public partial class MazeView3D : Node3D
         }
 
         _exploreFactor = Mathf.Clamp(factor, 0f, 1f);
-        _sun.LightEnergy = Mathf.Lerp(DaySunEnergy, ExploreSunEnergy, _exploreFactor);
-        environment.AmbientLightEnergy = Mathf.Lerp(DayAmbientEnergy, ExploreAmbientEnergy, _exploreFactor);
-        _playerLight.LightEnergy = Mathf.Lerp(0f, ExplorePlayerLightEnergy, _exploreFactor);
+        _sun.LightEnergy = Mathf.Lerp(DaySunEnergy, ExploreSunEnergy, _exploreFactor) * _brightnessMultiplier;
+        environment.AmbientLightEnergy = Mathf.Lerp(DayAmbientEnergy, ExploreAmbientEnergy, _exploreFactor) * _brightnessMultiplier;
+        _playerLight.LightEnergy = Mathf.Lerp(0f, ExplorePlayerLightEnergy, _exploreFactor) * _brightnessMultiplier * Mathf.Max(0.1f, _effectsIntensity);
         _playerLight.Visible = _exploreFactor > 0.01f;
         environment.FogEnabled = _exploreFactor > 0.01f;
-        environment.FogDensity = Mathf.Lerp(0f, ExploreFogDensity, _exploreFactor);
+        environment.FogDensity = Mathf.Lerp(0f, ExploreFogDensity * _effectsIntensity, _exploreFactor);
     }
 }

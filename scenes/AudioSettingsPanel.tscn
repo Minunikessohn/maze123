@@ -1,0 +1,69 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/UI/AudioSettingsPanel.cs" id="1_audio"]
+
+[node name="AudioSettingsPanel" type="VBoxContainer"]
+script = ExtResource("1_audio")
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 16
+
+[node name="MonsterRow" type="HBoxContainer" parent="."]
+theme_override_constants/separation = 12
+
+[node name="MonsterLabel" type="Label" parent="MonsterRow"]
+text = "Monster"
+custom_minimum_size = Vector2(150, 0)
+
+[node name="MonsterSlider" type="HSlider" parent="MonsterRow"]
+size_flags_horizontal = 3
+
+[node name="MonsterValueLabel" type="Label" parent="MonsterRow"]
+text = "100%"
+custom_minimum_size = Vector2(70, 0)
+horizontal_alignment = 2
+
+[node name="FootstepRow" type="HBoxContainer" parent="."]
+theme_override_constants/separation = 12
+
+[node name="FootstepLabel" type="Label" parent="FootstepRow"]
+text = "Laufgeraeusche"
+custom_minimum_size = Vector2(150, 0)
+
+[node name="FootstepSlider" type="HSlider" parent="FootstepRow"]
+size_flags_horizontal = 3
+
+[node name="FootstepValueLabel" type="Label" parent="FootstepRow"]
+text = "100%"
+custom_minimum_size = Vector2(70, 0)
+horizontal_alignment = 2
+
+[node name="GoalRow" type="HBoxContainer" parent="."]
+theme_override_constants/separation = 12
+
+[node name="GoalLabel" type="Label" parent="GoalRow"]
+text = "Ziel gefunden"
+custom_minimum_size = Vector2(150, 0)
+
+[node name="GoalSlider" type="HSlider" parent="GoalRow"]
+size_flags_horizontal = 3
+
+[node name="GoalValueLabel" type="Label" parent="GoalRow"]
+text = "100%"
+custom_minimum_size = Vector2(70, 0)
+horizontal_alignment = 2
+
+[node name="MasterRow" type="HBoxContainer" parent="."]
+theme_override_constants/separation = 12
+
+[node name="MasterLabel" type="Label" parent="MasterRow"]
+text = "Gesamtlautstaerke"
+custom_minimum_size = Vector2(150, 0)
+
+[node name="MasterSlider" type="HSlider" parent="MasterRow"]
+size_flags_horizontal = 3
+
+[node name="MasterValueLabel" type="Label" parent="MasterRow"]
+text = "100%"
+custom_minimum_size = Vector2(70, 0)
+horizontal_alignment = 2
