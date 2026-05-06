@@ -30,6 +30,8 @@ public partial class CameraController3D : Camera3D
     private float _followOrbitYaw;
     private float _followOrbitPitch;
     private float _followOrbitRadius;
+    private Vector3 _externalShakeOffset;
+    private Vector3 _appliedShakeOffset;
 
     public bool FollowMode { get; private set; }
 
@@ -43,6 +45,8 @@ public partial class CameraController3D : Camera3D
 
     public override void _Process(double delta)
     {
+        RemoveAppliedShakeOffset();
+
         if (!IsVisibleInTree())
         {
             return;
@@ -51,12 +55,14 @@ public partial class CameraController3D : Camera3D
         if (FollowMode && _followTarget is not null)
         {
             UpdateFollowCamera(delta);
+            ApplyExternalShakeOffset();
             return;
         }
 
         HandleMovement(delta);
         HandleKeyboardLook(delta);
         ApplyRotation();
+        ApplyExternalShakeOffset();
     }
 
     private void HandleMovement(double delta)
@@ -247,6 +253,11 @@ public partial class CameraController3D : Camera3D
         Fov = Mathf.Clamp(fieldOfView, 55f, 100f);
     }
 
+    public void SetExternalShakeOffset(Vector3 offset)
+    {
+        _externalShakeOffset = offset;
+    }
+
     private void UpdateFollowCamera(double delta)
     {
         if (_followTarget is null)
@@ -331,6 +342,28 @@ public partial class CameraController3D : Camera3D
             Mathf.Sin(_followOrbitYaw) * cosPitch,
             sinPitch,
             Mathf.Cos(_followOrbitYaw) * cosPitch) * _followOrbitRadius;
+    }
+
+    private void RemoveAppliedShakeOffset()
+    {
+        if (_appliedShakeOffset == Vector3.Zero)
+        {
+            return;
+        }
+
+        GlobalPosition -= _appliedShakeOffset;
+        _appliedShakeOffset = Vector3.Zero;
+    }
+
+    private void ApplyExternalShakeOffset()
+    {
+        if (_externalShakeOffset == Vector3.Zero)
+        {
+            return;
+        }
+
+        GlobalPosition += _externalShakeOffset;
+        _appliedShakeOffset = _externalShakeOffset;
     }
 
     private Vector2 GetMoveInput()

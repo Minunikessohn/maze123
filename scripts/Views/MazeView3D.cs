@@ -2,6 +2,7 @@
 
 using System.Collections.Generic;
 using Godot;
+using Maze.Effects;
 using Maze.Model;
 
 namespace Maze.Views;
@@ -24,6 +25,7 @@ public partial class MazeView3D : Node3D
     private DirectionalLight3D _sun = null!;
     private OmniLight3D _playerLight = null!;
     private WorldEnvironment _worldEnvironment = null!;
+    private ProximityEffectController _proximityEffects = null!;
     private Node3D _wallContainer = null!;
     private Node3D _markerContainer = null!;
     private MeshInstance3D _floor = null!;
@@ -42,7 +44,9 @@ public partial class MazeView3D : Node3D
     private float _effectsIntensity = 1f;
     private float _markerAnimationTime;
     private readonly List<Vector2I> _trailCells = new();
+    private readonly List<Vector2I> _monsterCells = new();
     private readonly HashSet<Vector2I> _trailCellSet = new();
+    private Vector2I? _playerCell;
 
     private const float DaySunEnergy = 1.0f;
     private const float DayAmbientEnergy = 0.4f;
@@ -108,6 +112,7 @@ public partial class MazeView3D : Node3D
         _sun = GetNode<DirectionalLight3D>("Sun");
         _playerLight = GetNode<OmniLight3D>("Player/PlayerLight");
         _worldEnvironment = GetNode<WorldEnvironment>("WorldEnvironment");
+        _proximityEffects = GetNode<ProximityEffectController>("MonsterProximityOverlay");
         _wallContainer = GetNode<Node3D>("WallContainer");
         _floor = GetNode<MeshInstance3D>("Floor");
         _wallsHorizontal = GetNode<MultiMeshInstance3D>("WallContainer/WallsHorizontal");
@@ -123,6 +128,8 @@ public partial class MazeView3D : Node3D
             _worldEnvironment.Environment = (Environment)_worldEnvironment.Environment.Duplicate();
         }
 
+        _proximityEffects.SetCamera(_camera);
+        _proximityEffects.SetEffectsScale(_effectsIntensity);
         ApplyExploreFactor(0f);
     }
 
@@ -153,6 +160,9 @@ public partial class MazeView3D : Node3D
         _floor.Mesh = null;
         ResetMultiMeshes();
         ClearTrail();
+        _monsterCells.Clear();
+        _playerCell = null;
+        _proximityEffects.Clear();
         _startMarker.Visible = false;
         _goalMarker.Visible = false;
     }
@@ -188,6 +198,25 @@ public partial class MazeView3D : Node3D
         _trailCells.Clear();
         _trailCellSet.Clear();
         RebuildTrail();
+    }
+
+    public void SetMonsterCells(IEnumerable<Vector2I> monsterCells)
+    {
+        _monsterCells.Clear();
+        _monsterCells.AddRange(monsterCells);
+        RefreshMonsterProximity();
+    }
+
+    public void UpdateMonsterProximity(Vector2I playerCell)
+    {
+        _playerCell = playerCell;
+        RefreshMonsterProximity();
+    }
+
+    public void ClearProximityEffects()
+    {
+        _playerCell = null;
+        _proximityEffects.Clear();
     }
 
     private void Rebuild()
@@ -533,6 +562,8 @@ public partial class MazeView3D : Node3D
         TrailMaterial.EmissionEnergyMultiplier = 0.65f * _effectsIntensity;
         _startMarkerLight.LightEnergy = 0.85f * Mathf.Max(0.1f, _effectsIntensity);
         _goalMarkerLight.LightEnergy = 1.05f * Mathf.Max(0.1f, _effectsIntensity);
+        _proximityEffects.SetEffectsScale(_effectsIntensity);
+        RefreshMonsterProximity();
         ApplyExploreFactor(_exploreFactor);
     }
 
@@ -551,5 +582,28 @@ public partial class MazeView3D : Node3D
         _playerLight.Visible = _exploreFactor > 0.01f;
         environment.FogEnabled = _exploreFactor > 0.01f;
         environment.FogDensity = Mathf.Lerp(0f, ExploreFogDensity * _effectsIntensity, _exploreFactor);
+    }
+
+    private void RefreshMonsterProximity()
+    {
+        if (_playerCell is null || _monsterCells.Count == 0)
+        {
+            _proximityEffects.Clear();
+            return;
+        }
+
+        float nearestDistance = float.MaxValue;
+        Vector2 playerCell = _playerCell.Value;
+
+        foreach (Vector2I monsterCell in _monsterCells)
+        {
+            float distance = playerCell.DistanceTo(monsterCell);
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+            }
+        }
+
+        _proximityEffects.ApplyNearestMonsterDistance(nearestDistance);
     }
 }

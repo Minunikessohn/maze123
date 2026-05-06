@@ -176,12 +176,14 @@ public partial class Main : Node
         _solverPath.Clear();
         _player.Hide();
         _view3D.ClearTrail();
+        _view3D.ClearProximityEffects();
         ResetExploreMode();
         _camera3D.DisableFollow();
         _currentMaze = new global::Maze.Model.Maze(sanitizedConfig.Width, sanitizedConfig.Height);
         _sessionState.ResetForNewGame(sanitizedConfig, _currentMaze);
         _lastMazeBuiltFor3D = null;
         _view2D.SetMaze(_currentMaze);
+        _view3D.SetMonsterCells(_sessionState.ActiveMonsterCells);
         _view3D.ClearMaze();
 
         _runner.StartGeneration(generator.Generate(_currentMaze, _random));
@@ -444,6 +446,7 @@ public partial class Main : Node
         _runner.StopAll();
         _player.Hide();
         _view3D.ClearTrail();
+        _view3D.ClearProximityEffects();
         ResetExploreMode();
         _camera3D.DisableFollow();
         RefreshSaveSlots();
@@ -466,6 +469,7 @@ public partial class Main : Node
         _solverPath.Clear();
         _player.Hide();
         _view3D.ClearTrail();
+        _view3D.ClearProximityEffects();
         ResetExploreMode();
         _camera3D.DisableFollow();
 
@@ -595,6 +599,7 @@ public partial class Main : Node
     private void OnPlayerCellVisited(int x, int y)
     {
         _view3D.MarkTrailCell(x, y);
+        _view3D.UpdateMonsterProximity(new Vector2I(x, y));
     }
 
     private void OnPlayManualToggle(bool active)
@@ -680,6 +685,7 @@ public partial class Main : Node
         _player.DisableManualMode();
         _isManualMode = false;
         _sessionState.IsManualMode = false;
+        _view3D.ClearProximityEffects();
 
         _camera3D.DisableFollow();
 
@@ -802,6 +808,8 @@ public partial class Main : Node
 
             _view2D.SetMaze(_currentMaze);
             _view2D.ForceRefresh();
+            _view3D.SetMonsterCells(_sessionState.ActiveMonsterCells);
+            _view3D.ClearProximityEffects();
             _view3D.SetMaze(_currentMaze);
             _lastMazeBuiltFor3D = _currentMaze;
 
