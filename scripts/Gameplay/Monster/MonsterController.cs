@@ -335,12 +335,16 @@ public partial class MonsterController : Node3D
         if (_playerCell is not Vector2I playerCell || _maze is null)
         {
             CanSeePlayerNow = false;
+            LastSeenPlayerCell = null;
+            _searchElapsed = 0f;
             return;
         }
 
         CanSeePlayerNow = CanSeePlayer(CurrentCell, playerCell, MaxSightRangeCells);
         if (!CanSeePlayerNow)
         {
+            LastSeenPlayerCell = null;
+            _searchElapsed = 0f;
             return;
         }
 
@@ -546,40 +550,54 @@ public partial class MonsterController : Node3D
         }
 
         int clampedRange = Math.Max(0, maxRangeCells);
-        Dictionary<Vector2I, int> distances = new() { [monsterCell] = 0 };
-        Queue<Vector2I> frontier = new();
-        frontier.Enqueue(monsterCell);
-
-        while (frontier.Count > 0)
+        if (monsterCell.X == playerCell.X)
         {
-            Vector2I current = frontier.Dequeue();
-            int currentDistance = distances[current];
-            if (currentDistance >= clampedRange)
+            int distance = Math.Abs(playerCell.Y - monsterCell.Y);
+            if (distance > clampedRange)
             {
-                continue;
+                return false;
             }
 
-            Cell currentCell = maze.GetCell(current.X, current.Y);
-            foreach (Cell neighbor in GetReachableNeighbors(maze, currentCell))
+            Direction direction = playerCell.Y > monsterCell.Y ? Direction.South : Direction.North;
+            return HasClearSightLine(maze, monsterCell, direction, distance);
+        }
+
+        if (monsterCell.Y == playerCell.Y)
+        {
+            int distance = Math.Abs(playerCell.X - monsterCell.X);
+            if (distance > clampedRange)
             {
-                Vector2I neighborCell = new(neighbor.X, neighbor.Y);
-                if (distances.ContainsKey(neighborCell))
-                {
-                    continue;
-                }
-
-                int nextDistance = currentDistance + 1;
-                if (neighborCell == playerCell)
-                {
-                    return nextDistance <= clampedRange;
-                }
-
-                distances[neighborCell] = nextDistance;
-                frontier.Enqueue(neighborCell);
+                return false;
             }
+
+            Direction direction = playerCell.X > monsterCell.X ? Direction.East : Direction.West;
+            return HasClearSightLine(maze, monsterCell, direction, distance);
         }
 
         return false;
+    }
+
+    private static bool HasClearSightLine(global::Maze.Model.Maze maze, Vector2I origin, Direction direction, int distance)
+    {
+        Cell currentCell = maze.GetCell(origin.X, origin.Y);
+
+        for (int step = 0; step < distance; step++)
+        {
+            if (currentCell.HasWall(direction))
+            {
+                return false;
+            }
+
+            Cell? neighbor = maze.GetNeighbor(currentCell, direction);
+            if (neighbor is null)
+            {
+                return false;
+            }
+
+            currentCell = neighbor;
+        }
+
+        return true;
     }
 
     private static List<Vector2I> ReconstructPath(Dictionary<Vector2I, Vector2I> cameFrom, Vector2I startCell, Vector2I goalCell)

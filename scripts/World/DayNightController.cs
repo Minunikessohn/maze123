@@ -8,7 +8,8 @@ namespace Maze.World;
 public partial class DayNightController : Node
 {
     public const float DefaultCycleDurationSeconds = 90f;
-    public const float NightStartsAt = 0.5f;
+    public const float NightStartsAt = 0.25f;
+    public const float DayStartsAt = 0.75f;
 
     [Export(PropertyHint.Range, "15,600,1,or_greater")]
     public float CycleDurationSeconds { get; set; } = DefaultCycleDurationSeconds;
@@ -47,7 +48,7 @@ public partial class DayNightController : Node
     {
         bool wasNight = IsNight;
         TimeOfDay = Mathf.PosMod(timeOfDay, 1f);
-        IsNight = TimeOfDay >= NightStartsAt;
+        IsNight = TimeOfDay >= NightStartsAt && TimeOfDay < DayStartsAt;
 
         if (!emitSignals || wasNight == IsNight)
         {

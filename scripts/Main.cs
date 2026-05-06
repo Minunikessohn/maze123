@@ -1132,7 +1132,9 @@ public partial class Main : Node
             return new List<Vector2I>();
         }
 
-        int spawnCount = Math.Max(1, (int)Math.Round(candidates.Count * 0.04d, MidpointRounding.AwayFromZero));
+        int totalMazeCells = maze.Width * maze.Height;
+        int spawnCount = Math.Max(1, (int)Math.Round(totalMazeCells * 0.01d, MidpointRounding.AwayFromZero));
+        spawnCount = Math.Min(spawnCount, candidates.Count);
         int minimumStartDistance = Math.Max(2, (int)Math.Round((maze.Width + maze.Height) * 0.2d, MidpointRounding.AwayFromZero));
         List<(Vector2I Position, int Distance)> preferredCandidates = candidates.FindAll(candidate => candidate.Distance >= minimumStartDistance);
         List<(Vector2I Position, int Distance)> source = preferredCandidates.Count >= spawnCount ? preferredCandidates : candidates;
