@@ -3,6 +3,7 @@
 using System.Collections.Generic;
 using Godot;
 using Maze.Game;
+using Maze.Gameplay.Traps;
 using Maze.Model;
 using Maze.World;
 
@@ -27,6 +28,7 @@ public partial class MonsterManager : Node3D
 
     private PackedScene _monsterScene = null!;
     private DayNightController? _dayNightController;
+    private TrapManager? _trapManager;
     private MazeGameConfig? _config;
     private global::Maze.Model.Maze? _maze;
     private Vector2I? _playerCell;
@@ -67,6 +69,11 @@ public partial class MonsterManager : Node3D
         _dayNightController = controller;
         _dayNightController.DayStarted += OnDayStarted;
         _dayNightController.NightStarted += OnNightStarted;
+    }
+
+    public void BindTrapManager(TrapManager? trapManager)
+    {
+        _trapManager = trapManager;
     }
 
     public void Configure(MazeGameConfig? config, global::Maze.Model.Maze? maze, IEnumerable<Vector2I> spawnCells, float cellSize)
@@ -267,6 +274,45 @@ public partial class MonsterManager : Node3D
         _stunOverlapMonsters.Clear();
     }
 
+    private void DespawnMonster(MonsterController monster)
+    {
+        if (!_monsterIndices.TryGetValue(monster, out int removedIndex))
+        {
+            return;
+        }
+
+        monster.CellChanged -= OnMonsterCellChanged;
+        _monsterIndices.Remove(monster);
+        _stunOverlapMonsters.Remove(monster);
+
+        if (removedIndex >= 0 && removedIndex < _activeMonsters.Count)
+        {
+            _activeMonsters.RemoveAt(removedIndex);
+        }
+
+        if (removedIndex >= 0 && removedIndex < _activeMonsterCells.Count)
+        {
+            _activeMonsterCells.RemoveAt(removedIndex);
+        }
+
+        RebuildMonsterIndices();
+
+        if (IsInstanceValid(monster))
+        {
+            monster.QueueFree();
+        }
+    }
+
+    private void RebuildMonsterIndices()
+    {
+        _monsterIndices.Clear();
+
+        for (int index = 0; index < _activeMonsters.Count; index++)
+        {
+            _monsterIndices[_activeMonsters[index]] = index;
+        }
+    }
+
     private void OnMonsterCellChanged(MonsterController monster, Vector2I cell)
     {
         if (!_monsterIndices.TryGetValue(monster, out int index) || index < 0 || index >= _activeMonsterCells.Count)
@@ -275,5 +321,10 @@ public partial class MonsterManager : Node3D
         }
 
         _activeMonsterCells[index] = cell;
+
+        if (_trapManager?.TryConsumeTrapAtCell(cell) == true)
+        {
+            DespawnMonster(monster);
+        }
     }
 }

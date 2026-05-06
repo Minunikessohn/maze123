@@ -107,6 +107,7 @@ public partial class Main : Node
         _dayNightController.DayStarted += OnDayStarted;
         _dayNightController.NightStarted += OnNightStarted;
         _monsterManager.BindDayNightController(_dayNightController);
+        _monsterManager.BindTrapManager(_trapManager);
         _pauseMenu.SetVisualSettings(_sessionState.VisualSettings);
         _pauseMenu.SetAudioSettings(_sessionState.AudioSettings);
         RefreshSaveSlots();
@@ -146,6 +147,7 @@ public partial class Main : Node
         }
 
         SyncDayNightState();
+        SyncTrapState();
         UpdateMonsterStunCollision();
     }
 
@@ -1081,8 +1083,20 @@ public partial class Main : Node
     private void ConfigureTrapSystem()
     {
         _trapManager.Configure(_currentGameConfig, _currentMaze, _sessionState.TrapDefinitions, _view3D.CellSize);
+        SyncTrapState();
+    }
+
+    private void SyncTrapState()
+    {
+        HashSet<Vector2I> activeTrapCells = new(_trapManager.ActiveTrapCells);
+
         _sessionState.ActiveTrapCells.Clear();
-        _sessionState.ActiveTrapCells.AddRange(_trapManager.ActiveTrapCells);
+        _sessionState.ActiveTrapCells.AddRange(activeTrapCells);
+
+        foreach (TrapDefinition trap in _sessionState.TrapDefinitions)
+        {
+            trap.IsArmed = activeTrapCells.Contains(trap.Cell);
+        }
     }
 
     private void ConfigureMonsterSystem() =>
