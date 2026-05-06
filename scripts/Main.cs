@@ -26,6 +26,8 @@ public partial class Main : Node
     private const double TrapSpawnRate = 0.005d;
     private const int MinimumTrapStartDistance = 6;
     private const int MinimumTrapSpacing = 3;
+    private const int MinimumTrapGoalDistance = 2;
+    private const int PreferredTrapOpenNeighborCount = 3;
     private const int TrapSeedSalt = unchecked((int)0x5F3759DF);
 
     private MainMenu _mainMenu = null!;
@@ -1312,9 +1314,10 @@ public partial class Main : Node
         Cell goalCell,
         IReadOnlyCollection<Vector2I> monsterSpawnCells)
     {
-        Dictionary<Vector2I, int> distances = ComputeDistancesFromStart(maze, startCell);
+        Dictionary<Vector2I, int> distancesFromStart = ComputeDistancesFromStart(maze, startCell);
+        Dictionary<Vector2I, int> distancesFromGoal = ComputeDistancesFromStart(maze, goalCell);
         HashSet<Vector2I> forbiddenCells = BuildForbiddenTrapCells(maze, startCell, goalCell, monsterSpawnCells);
-        List<(Vector2I Position, int Distance)> candidates = new();
+        List<(Vector2I Position, int DistanceFromStart, int DistanceFromGoal, int OpenNeighborCount)> candidates = new();
 
         foreach (Cell cell in maze.AllCells())
         {
@@ -1325,12 +1328,13 @@ public partial class Main : Node
                 continue;
             }
 
-            if (!distances.TryGetValue(position, out int distance))
+            if (!distancesFromStart.TryGetValue(position, out int distanceFromStart)
+                || !distancesFromGoal.TryGetValue(position, out int distanceFromGoal))
             {
                 continue;
             }
 
-            candidates.Add((position, distance));
+            candidates.Add((position, distanceFromStart, distanceFromGoal, CountReachableNeighbors(maze, cell)));
         }
 
         if (candidates.Count == 0)
@@ -1347,7 +1351,27 @@ public partial class Main : Node
         }
 
         Random trapRandom = new(unchecked(config.Seed ^ TrapSeedSalt));
-        List<(Vector2I Position, int Distance)> preferredCandidates = candidates.FindAll(candidate => candidate.Distance >= MinimumTrapStartDistance);
+        List<(Vector2I Position, int DistanceFromStart, int DistanceFromGoal, int OpenNeighborCount)> preferredCandidates =
+            candidates.FindAll(candidate =>
+                candidate.DistanceFromStart >= MinimumTrapStartDistance
+                && candidate.DistanceFromGoal >= MinimumTrapGoalDistance
+                && candidate.OpenNeighborCount >= PreferredTrapOpenNeighborCount);
+
+        if (preferredCandidates.Count < trapCount)
+        {
+            preferredCandidates = candidates.FindAll(candidate =>
+                candidate.DistanceFromStart >= MinimumTrapStartDistance
+                && candidate.DistanceFromGoal >= MinimumTrapGoalDistance
+                && candidate.OpenNeighborCount >= 2);
+        }
+
+        if (preferredCandidates.Count < trapCount)
+        {
+            preferredCandidates = candidates.FindAll(candidate =>
+                candidate.DistanceFromStart >= MinimumTrapStartDistance
+                && candidate.DistanceFromGoal >= MinimumTrapGoalDistance);
+        }
+
         List<Vector2I> selectedCells = SelectTrapCells(preferredCandidates, candidates, trapCount, trapRandom);
         List<TrapDefinition> trapDefinitions = new(selectedCells.Count);
 
@@ -1427,8 +1451,8 @@ public partial class Main : Node
     }
 
     private static List<Vector2I> SelectTrapCells(
-        List<(Vector2I Position, int Distance)> preferredCandidates,
-        List<(Vector2I Position, int Distance)> allCandidates,
+        List<(Vector2I Position, int DistanceFromStart, int DistanceFromGoal, int OpenNeighborCount)> preferredCandidates,
+        List<(Vector2I Position, int DistanceFromStart, int DistanceFromGoal, int OpenNeighborCount)> allCandidates,
         int trapCount,
         Random random)
     {
@@ -1443,7 +1467,7 @@ public partial class Main : Node
     }
 
     private static void TrySelectTrapCells(
-        List<(Vector2I Position, int Distance)> sourceCandidates,
+        List<(Vector2I Position, int DistanceFromStart, int DistanceFromGoal, int OpenNeighborCount)> sourceCandidates,
         int trapCount,
         Random random,
         List<Vector2I> selectedCells,
@@ -1455,11 +1479,11 @@ public partial class Main : Node
             return;
         }
 
-        List<(Vector2I Position, int Distance)> shuffledCandidates = new(sourceCandidates);
+        List<(Vector2I Position, int DistanceFromStart, int DistanceFromGoal, int OpenNeighborCount)> shuffledCandidates = new(sourceCandidates);
         ShuffleInPlace(shuffledCandidates, random);
-        shuffledCandidates.Sort(static (left, right) => right.Distance.CompareTo(left.Distance));
+        shuffledCandidates.Sort(static (left, right) => CompareTrapCandidates(left, right));
 
-        foreach ((Vector2I position, _) in shuffledCandidates)
+        foreach ((Vector2I position, _, _, _) in shuffledCandidates)
         {
             if (selectedCells.Count >= trapCount || selectedSet.Contains(position))
             {
@@ -1474,6 +1498,25 @@ public partial class Main : Node
             selectedCells.Add(position);
             selectedSet.Add(position);
         }
+    }
+
+    private static int CompareTrapCandidates(
+        (Vector2I Position, int DistanceFromStart, int DistanceFromGoal, int OpenNeighborCount) left,
+        (Vector2I Position, int DistanceFromStart, int DistanceFromGoal, int OpenNeighborCount) right)
+    {
+        int openNeighborComparison = right.OpenNeighborCount.CompareTo(left.OpenNeighborCount);
+        if (openNeighborComparison != 0)
+        {
+            return openNeighborComparison;
+        }
+
+        int goalDistanceComparison = right.DistanceFromGoal.CompareTo(left.DistanceFromGoal);
+        if (goalDistanceComparison != 0)
+        {
+            return goalDistanceComparison;
+        }
+
+        return right.DistanceFromStart.CompareTo(left.DistanceFromStart);
     }
 
     private static bool IsTrapSpacingValid(Vector2I candidate, IEnumerable<Vector2I> selectedCells)
@@ -1508,6 +1551,13 @@ public partial class Main : Node
 
     private static bool HasOpenNeighbor(global::Maze.Model.Maze maze, Cell cell)
     {
+        return CountReachableNeighbors(maze, cell) > 0;
+    }
+
+    private static int CountReachableNeighbors(global::Maze.Model.Maze maze, Cell cell)
+    {
+        int reachableNeighborCount = 0;
+
         foreach (Direction direction in All)
         {
             if (cell.HasWall(direction))
@@ -1518,11 +1568,11 @@ public partial class Main : Node
             Cell? neighbor = maze.GetNeighbor(cell, direction);
             if (neighbor is not null)
             {
-                return true;
+                reachableNeighborCount++;
             }
         }
 
-        return false;
+        return reachableNeighborCount;
     }
 
     private static IEnumerable<Cell> GetReachableNeighbors(global::Maze.Model.Maze maze, Cell cell)
