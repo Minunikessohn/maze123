@@ -1,0 +1,43 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/Gameplay/Traps/TrapInstance.cs" id="1_instance"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_plate"]
+top_radius = 0.34
+bottom_radius = 0.34
+height = 0.03
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_core"]
+top_radius = 0.14
+bottom_radius = 0.14
+height = 0.06
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_plate"]
+albedo_color = Color(0.372549, 0.137255, 0.12549, 1)
+metallic = 0.35
+roughness = 0.22
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_core"]
+albedo_color = Color(1, 0.439216, 0.262745, 1)
+emission_enabled = true
+emission = Color(1, 0.439216, 0.262745, 1)
+emission_energy_multiplier = 1.35
+roughness = 0.14
+
+[node name="MonsterTrap" type="Node3D"]
+script = ExtResource("1_instance")
+
+[node name="Plate" type="MeshInstance3D" parent="."]
+mesh = SubResource("CylinderMesh_plate")
+surface_material_override/0 = SubResource("StandardMaterial3D_plate")
+
+[node name="Core" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.028, 0)
+mesh = SubResource("CylinderMesh_core")
+surface_material_override/0 = SubResource("StandardMaterial3D_core")
+
+[node name="Glow" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.09, 0)
+light_color = Color(1, 0.439216, 0.262745, 1)
+light_energy = 0.45
+omni_range = 1.6

@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3 uid="uid://b0maze0view3d"]
+[gd_scene load_steps=12 format=3 uid="uid://b0maze0view3d"]
 
 [ext_resource type="Script" path="res://scripts/Views/MazeView3D.cs" id="1_view3d"]
 [ext_resource type="Script" path="res://scripts/Views/CameraController3D.cs" id="2_camctl"]
@@ -7,6 +7,7 @@
 [ext_resource type="Texture2D" path="res://assets/devedse.png" id="5_atlas"]
 [ext_resource type="PackedScene" path="res://scenes/MonsterProximityOverlay.tscn" id="6_overlay"]
 [ext_resource type="Script" path="res://scripts/Gameplay/Monster/MonsterManager.cs" id="7_monstermanager"]
+[ext_resource type="Script" path="res://scripts/Gameplay/Traps/TrapManager.cs" id="8_trapmanager"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_horizontal"]
 size = Vector3(1, 1.4, 0.1)
@@ -69,6 +70,9 @@ environment = SubResource("Environment_explore")
 
 [node name="MonsterManager" type="Node3D" parent="."]
 script = ExtResource("7_monstermanager")
+
+[node name="TrapManager" type="Node3D" parent="."]
+script = ExtResource("8_trapmanager")
 
 [node name="Floor" type="MeshInstance3D" parent="."]
 

@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using Godot;
 using Maze.Game;
+using Maze.Gameplay.Traps;
 using Maze.Gameplay.Monster;
 using Maze.Game.Settings;
 using Maze.Generators;
@@ -22,6 +23,10 @@ public partial class Main : Node
     private const float DefaultStepsPerSecond = 30f;
     private const float MaxSimulationSpeed = 100001f;
     private const float MonsterStunCollisionRadiusFactor = 0.45f;
+    private const double TrapSpawnRate = 0.005d;
+    private const int MinimumTrapStartDistance = 6;
+    private const int MinimumTrapSpacing = 3;
+    private const int TrapSeedSalt = unchecked((int)0x5F3759DF);
 
     private MainMenu _mainMenu = null!;
     private PauseMenu _pauseMenu = null!;
@@ -35,6 +40,7 @@ public partial class Main : Node
     private AlgorithmRunner _runner = null!;
     private DayNightController _dayNightController = null!;
     private MonsterManager _monsterManager = null!;
+    private TrapManager _trapManager = null!;
     private SaveGameService _saveGameService = null!;
     private global::Maze.Model.Maze? _currentMaze;
     private global::Maze.Model.Maze? _lastMazeBuiltFor3D;
@@ -88,6 +94,7 @@ public partial class Main : Node
         _runner = GetNode<AlgorithmRunner>("Runner");
         _dayNightController = GetNode<DayNightController>("DayNightController");
         _monsterManager = GetNode<MonsterManager>("MazeView3D/MonsterManager");
+        _trapManager = GetNode<TrapManager>("MazeView3D/TrapManager");
         _saveGameService = new SaveGameService();
 
         _mainMenu.StartNewMazeRequested += OnStartNewMazeRequested;
@@ -206,6 +213,7 @@ public partial class Main : Node
         _lastMazeBuiltFor3D = null;
         _view2D.SetMaze(_currentMaze);
         _view3D.ClearMaze();
+        ConfigureTrapSystem();
         ConfigureMonsterSystem();
         SyncDayNightState();
 
@@ -302,6 +310,8 @@ public partial class Main : Node
         _sessionState.StartCell = _currentMaze.GetCell(0, 0);
         _sessionState.GoalCell = _currentMaze.GetCell(_currentMaze.Width - 1, _currentMaze.Height - 1);
         EnsureMonsterSpawnCells();
+        EnsureTrapDefinitions();
+        ConfigureTrapSystem();
         ConfigureMonsterSystem();
         _tracker.Stop();
         _stats.UpdateStats(_tracker.Elapsed, _tracker.Steps, _tracker.VisitedCells, 0, _tracker.ManagedMemoryDeltaBytes);
@@ -857,6 +867,7 @@ public partial class Main : Node
             _view3D.ClearProximityEffects();
             _view3D.SetMaze(_currentMaze);
             _lastMazeBuiltFor3D = _currentMaze;
+            ConfigureTrapSystem();
             ConfigureMonsterSystem();
             SyncDayNightState();
 
@@ -1067,6 +1078,13 @@ public partial class Main : Node
         _dayNightController.SetPaused(_flowState != GameFlowState.Playing);
     }
 
+    private void ConfigureTrapSystem()
+    {
+        _trapManager.Configure(_currentGameConfig, _currentMaze, _sessionState.TrapDefinitions, _view3D.CellSize);
+        _sessionState.ActiveTrapCells.Clear();
+        _sessionState.ActiveTrapCells.AddRange(_trapManager.ActiveTrapCells);
+    }
+
     private void ConfigureMonsterSystem() =>
         _monsterManager.Configure(_currentGameConfig, _currentMaze, _sessionState.MonsterSpawnCells, _view3D.CellSize);
 
@@ -1161,6 +1179,29 @@ public partial class Main : Node
         }
     }
 
+    private void EnsureTrapDefinitions()
+    {
+        _sessionState.TrapDefinitions.Clear();
+        _sessionState.ActiveTrapCells.Clear();
+
+        if (_currentMaze is null || _currentGameConfig is null || !_currentGameConfig.TrapGenerationEnabled)
+        {
+            return;
+        }
+
+        Cell startCell = ResolveStartCell(_currentMaze);
+        Cell goalCell = ResolveGoalCell(_currentMaze);
+        List<TrapDefinition> trapDefinitions = ComputeTrapDefinitions(
+            _currentMaze,
+            _currentGameConfig,
+            startCell,
+            goalCell,
+            _sessionState.MonsterSpawnCells);
+
+        _sessionState.TrapDefinitions.AddRange(trapDefinitions);
+        _sessionState.ActiveTrapCells.AddRange(GetArmedTrapCells(trapDefinitions));
+    }
+
     private static List<Vector2I> ComputeMonsterSpawnCells(global::Maze.Model.Maze maze, Cell startCell, Cell goalCell)
     {
         Dictionary<Vector2I, int> distances = ComputeDistancesFromStart(maze, startCell);
@@ -1229,6 +1270,64 @@ public partial class Main : Node
         return selectedSpawnCells;
     }
 
+    private static List<TrapDefinition> ComputeTrapDefinitions(
+        global::Maze.Model.Maze maze,
+        MazeGameConfig config,
+        Cell startCell,
+        Cell goalCell,
+        IReadOnlyCollection<Vector2I> monsterSpawnCells)
+    {
+        Dictionary<Vector2I, int> distances = ComputeDistancesFromStart(maze, startCell);
+        HashSet<Vector2I> forbiddenCells = BuildForbiddenTrapCells(maze, startCell, goalCell, monsterSpawnCells);
+        List<(Vector2I Position, int Distance)> candidates = new();
+
+        foreach (Cell cell in maze.AllCells())
+        {
+            Vector2I position = new(cell.X, cell.Y);
+
+            if (forbiddenCells.Contains(position) || !HasOpenNeighbor(maze, cell))
+            {
+                continue;
+            }
+
+            if (!distances.TryGetValue(position, out int distance))
+            {
+                continue;
+            }
+
+            candidates.Add((position, distance));
+        }
+
+        if (candidates.Count == 0)
+        {
+            return new List<TrapDefinition>();
+        }
+
+        int trapCount = Math.Max(1, (int)Math.Round(maze.Width * maze.Height * TrapSpawnRate, MidpointRounding.AwayFromZero));
+        trapCount = Math.Min(trapCount, candidates.Count);
+
+        if (trapCount == 0)
+        {
+            return new List<TrapDefinition>();
+        }
+
+        Random trapRandom = new(unchecked(config.Seed ^ TrapSeedSalt));
+        List<(Vector2I Position, int Distance)> preferredCandidates = candidates.FindAll(candidate => candidate.Distance >= MinimumTrapStartDistance);
+        List<Vector2I> selectedCells = SelectTrapCells(preferredCandidates, candidates, trapCount, trapRandom);
+        List<TrapDefinition> trapDefinitions = new(selectedCells.Count);
+
+        foreach (Vector2I cell in selectedCells)
+        {
+            trapDefinitions.Add(new TrapDefinition
+            {
+                Cell = cell,
+                IsArmed = true
+            });
+        }
+
+        return trapDefinitions;
+    }
+
     private static Dictionary<Vector2I, int> ComputeDistancesFromStart(global::Maze.Model.Maze maze, Cell startCell)
     {
         Dictionary<Vector2I, int> distances = new();
@@ -1257,6 +1356,112 @@ public partial class Main : Node
         }
 
         return distances;
+    }
+
+    private static HashSet<Vector2I> BuildForbiddenTrapCells(
+        global::Maze.Model.Maze maze,
+        Cell startCell,
+        Cell goalCell,
+        IEnumerable<Vector2I> monsterSpawnCells)
+    {
+        HashSet<Vector2I> forbiddenCells = new();
+
+        AddCellAndNeighbors(maze, startCell, forbiddenCells);
+        AddCellAndNeighbors(maze, goalCell, forbiddenCells);
+
+        foreach (Vector2I spawnCell in monsterSpawnCells)
+        {
+            forbiddenCells.Add(spawnCell);
+        }
+
+        return forbiddenCells;
+    }
+
+    private static void AddCellAndNeighbors(global::Maze.Model.Maze maze, Cell origin, ISet<Vector2I> target)
+    {
+        target.Add(new Vector2I(origin.X, origin.Y));
+
+        foreach (Direction direction in All)
+        {
+            Cell? neighbor = maze.GetNeighbor(origin, direction);
+            if (neighbor is not null)
+            {
+                target.Add(new Vector2I(neighbor.X, neighbor.Y));
+            }
+        }
+    }
+
+    private static List<Vector2I> SelectTrapCells(
+        List<(Vector2I Position, int Distance)> preferredCandidates,
+        List<(Vector2I Position, int Distance)> allCandidates,
+        int trapCount,
+        Random random)
+    {
+        List<Vector2I> selectedCells = new(trapCount);
+        HashSet<Vector2I> selectedSet = new();
+
+        TrySelectTrapCells(preferredCandidates, trapCount, random, selectedCells, selectedSet, enforceSpacing: true);
+        TrySelectTrapCells(allCandidates, trapCount, random, selectedCells, selectedSet, enforceSpacing: true);
+        TrySelectTrapCells(allCandidates, trapCount, random, selectedCells, selectedSet, enforceSpacing: false);
+
+        return selectedCells;
+    }
+
+    private static void TrySelectTrapCells(
+        List<(Vector2I Position, int Distance)> sourceCandidates,
+        int trapCount,
+        Random random,
+        List<Vector2I> selectedCells,
+        HashSet<Vector2I> selectedSet,
+        bool enforceSpacing)
+    {
+        if (selectedCells.Count >= trapCount || sourceCandidates.Count == 0)
+        {
+            return;
+        }
+
+        List<(Vector2I Position, int Distance)> shuffledCandidates = new(sourceCandidates);
+        ShuffleInPlace(shuffledCandidates, random);
+        shuffledCandidates.Sort(static (left, right) => right.Distance.CompareTo(left.Distance));
+
+        foreach ((Vector2I position, _) in shuffledCandidates)
+        {
+            if (selectedCells.Count >= trapCount || selectedSet.Contains(position))
+            {
+                continue;
+            }
+
+            if (enforceSpacing && !IsTrapSpacingValid(position, selectedCells))
+            {
+                continue;
+            }
+
+            selectedCells.Add(position);
+            selectedSet.Add(position);
+        }
+    }
+
+    private static bool IsTrapSpacingValid(Vector2I candidate, IEnumerable<Vector2I> selectedCells)
+    {
+        foreach (Vector2I selectedCell in selectedCells)
+        {
+            int distance = Math.Abs(candidate.X - selectedCell.X) + Math.Abs(candidate.Y - selectedCell.Y);
+            if (distance < MinimumTrapSpacing)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static void ShuffleInPlace<T>(IList<T> items, Random random)
+    {
+        for (int index = items.Count - 1; index > 0; index--)
+        {
+            int swapIndex = random.Next(index + 1);
+            (items[index], items[swapIndex]) = (items[swapIndex], items[index]);
+        }
     }
 
     private static bool IsValidMonsterSpawnCell(global::Maze.Model.Maze maze, Cell candidate, Cell startCell, Cell goalCell)
