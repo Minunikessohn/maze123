@@ -59,6 +59,9 @@ public partial class MazeView3D : Node3D
     private const float NightAmbientEnergy = 0.08f;
     private const float NightFogDensity = 0.92f;
     private const float ExploreFogDepthDensity = 0.88f;
+    private const float FogDistanceDensityMultiplier = 1.15f;
+    private const float FogBeginDistanceRatio = 0.38f;
+    private const float FogDepthCurve = 3.2f;
     private const float NightPlayerLightEnergy = 1.2f;
     private const float DarkModeFactor = 0.45f;
     private static readonly Color DayFogColor = new("#cfd6df");
@@ -620,11 +623,11 @@ public partial class MazeView3D : Node3D
         float basePlayerLightEnergy = Mathf.Lerp(0f, NightPlayerLightEnergy, _dayNightFactor);
         float fogDensity = Mathf.Max(
             Mathf.Lerp(0f, NightFogDensity, _dayNightFactor),
-            Mathf.Lerp(0f, ExploreFogDepthDensity, _exploreFactor));
+            Mathf.Lerp(0f, ExploreFogDepthDensity, _exploreFactor)) * FogDistanceDensityMultiplier;
         float effectiveNightFactor = Mathf.Max(_dayNightFactor, _exploreFactor);
         bool fogActive = effectiveNightFactor > 0.01f;
         float fogEndDistance = Mathf.Max(2f, Mathf.Lerp(_cameraDefaultFar, _nightViewDistance, effectiveNightFactor));
-        float fogBeginDistance = Mathf.Max(0.1f, fogEndDistance * 0.55f);
+        float fogBeginDistance = Mathf.Max(0.1f, fogEndDistance * FogBeginDistanceRatio);
         Color fogColor = DayFogColor.Lerp(NightFogColor, _dayNightFactor).Lerp(ExploreFogColor, _exploreFactor);
 
         _sun.LightEnergy = Mathf.Lerp(baseSunEnergy, ExploreSunEnergy, _exploreFactor) * _brightnessMultiplier;
@@ -641,7 +644,7 @@ public partial class MazeView3D : Node3D
         environment.BackgroundColor = fogActive ? fogColor : DayFogColor;
         environment.FogDepthBegin = fogBeginDistance;
         environment.FogDepthEnd = fogEndDistance;
-        environment.FogDepthCurve = 2.4f;
+        environment.FogDepthCurve = FogDepthCurve;
         _camera.Far = _cameraDefaultFar;
     }
 
