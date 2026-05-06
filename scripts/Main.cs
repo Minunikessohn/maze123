@@ -13,6 +13,7 @@ using Maze.Solvers;
 using Maze.UI;
 using Maze.Views;
 using Maze.World;
+using static Maze.Model.DirectionHelper;
 
 namespace Maze;
 
@@ -297,7 +298,7 @@ public partial class Main : Node
         _sessionState.GoalReached = false;
         _sessionState.StartCell = _currentMaze.GetCell(0, 0);
         _sessionState.GoalCell = _currentMaze.GetCell(_currentMaze.Width - 1, _currentMaze.Height - 1);
-        EnsurePhase91MonsterSpawnCells();
+        EnsureMonsterSpawnCells();
         ConfigureMonsterSystem();
         _tracker.Stop();
         _stats.UpdateStats(_tracker.Elapsed, _tracker.Steps, _tracker.VisitedCells, 0, _tracker.ManagedMemoryDeltaBytes);
@@ -800,7 +801,7 @@ public partial class Main : Node
                 ResolveStartCell(_currentMaze),
                 ResolveGoalCell(_currentMaze),
                 _sessionState.ActiveTrapCells,
-                _sessionState.ActiveMonsterCells);
+                _sessionState.MonsterSpawnCells);
 
             _saveGameService.SaveMaze(saveData);
             RefreshSaveSlots();
@@ -835,11 +836,11 @@ public partial class Main : Node
 
             _sessionState.ResetForNewGame(_currentGameConfig, _currentMaze);
             _sessionState.ActiveTrapCells.AddRange(ConvertTrapCells(saveData));
-            _sessionState.ActiveMonsterCells.AddRange(ConvertMonsterCells(saveData));
+            _sessionState.MonsterSpawnCells.AddRange(ConvertMonsterCells(saveData));
             _sessionState.StartCell = ResolveSavePoint(_currentMaze, saveData.StartCell, 0, 0);
             _sessionState.GoalCell = ResolveSavePoint(_currentMaze, saveData.GoalCell, _currentMaze.Width - 1, _currentMaze.Height - 1);
             _sessionState.IsRunning = true;
-            EnsurePhase91MonsterSpawnCells();
+            EnsureMonsterSpawnCells();
             ConfigureDayNightCycle(_currentGameConfig);
 
             _view2D.SetMaze(_currentMaze);
@@ -1004,7 +1005,7 @@ public partial class Main : Node
     }
 
     private void ConfigureMonsterSystem() =>
-        _monsterManager.Configure(_currentGameConfig, _sessionState.ActiveMonsterCells, _view3D.CellSize);
+        _monsterManager.Configure(_currentGameConfig, _sessionState.MonsterSpawnCells, _view3D.CellSize);
 
     private void SyncDayNightState()
     {
@@ -1047,45 +1048,163 @@ public partial class Main : Node
         return _currentGameConfig.DayNightCycleEnabled && _dayNightController.IsNight;
     }
 
-    private void EnsurePhase91MonsterSpawnCells()
+    private void EnsureMonsterSpawnCells()
     {
         if (_currentMaze is null || _currentGameConfig is null || !_currentGameConfig.MonsterGenerationEnabled)
         {
             return;
         }
 
-        if (_sessionState.ActiveMonsterCells.Count > 0)
+        if (_sessionState.MonsterSpawnCells.Count > 0)
         {
             return;
         }
 
         Cell startCell = ResolveStartCell(_currentMaze);
         Cell goalCell = ResolveGoalCell(_currentMaze);
-        Vector2I? spawnCell = FindPhase91MonsterSpawnCell(_currentMaze, startCell, goalCell);
-        if (spawnCell is Vector2I cell)
+        foreach (Vector2I spawnCell in ComputeMonsterSpawnCells(_currentMaze, startCell, goalCell))
         {
-            _sessionState.ActiveMonsterCells.Add(cell);
+            _sessionState.MonsterSpawnCells.Add(spawnCell);
         }
     }
 
-    private static Vector2I? FindPhase91MonsterSpawnCell(global::Maze.Model.Maze maze, Cell startCell, Cell goalCell)
+    private static List<Vector2I> ComputeMonsterSpawnCells(global::Maze.Model.Maze maze, Cell startCell, Cell goalCell)
     {
-        for (int y = maze.Height - 1; y >= 0; y--)
+        Dictionary<Vector2I, int> distances = ComputeDistancesFromStart(maze, startCell);
+        List<(Vector2I Position, int Distance)> candidates = new();
+
+        foreach (Cell cell in maze.AllCells())
         {
-            for (int x = maze.Width - 1; x >= 0; x--)
+            if (!IsValidMonsterSpawnCell(maze, cell, startCell, goalCell))
             {
-                bool isStart = x == startCell.X && y == startCell.Y;
-                bool isGoal = x == goalCell.X && y == goalCell.Y;
-                if (isStart || isGoal)
+                continue;
+            }
+
+            Vector2I position = new(cell.X, cell.Y);
+            if (!distances.TryGetValue(position, out int distance))
+            {
+                continue;
+            }
+
+            candidates.Add((position, distance));
+        }
+
+        if (candidates.Count == 0)
+        {
+            return new List<Vector2I>();
+        }
+
+        int spawnCount = Math.Max(1, (int)Math.Round(candidates.Count * 0.04d, MidpointRounding.AwayFromZero));
+        int minimumStartDistance = Math.Max(2, (int)Math.Round((maze.Width + maze.Height) * 0.2d, MidpointRounding.AwayFromZero));
+        List<(Vector2I Position, int Distance)> preferredCandidates = candidates.FindAll(candidate => candidate.Distance >= minimumStartDistance);
+        List<(Vector2I Position, int Distance)> source = preferredCandidates.Count >= spawnCount ? preferredCandidates : candidates;
+
+        source.Sort(static (left, right) =>
+        {
+            int distanceComparison = right.Distance.CompareTo(left.Distance);
+            if (distanceComparison != 0)
+            {
+                return distanceComparison;
+            }
+
+            int yComparison = right.Position.Y.CompareTo(left.Position.Y);
+            return yComparison != 0 ? yComparison : right.Position.X.CompareTo(left.Position.X);
+        });
+
+        if (source.Count <= spawnCount)
+        {
+            List<Vector2I> allCells = new(source.Count);
+            foreach ((Vector2I position, _) in source)
+            {
+                allCells.Add(position);
+            }
+
+            return allCells;
+        }
+
+        List<Vector2I> selectedSpawnCells = new(spawnCount);
+        double stride = source.Count / (double)spawnCount;
+
+        for (int index = 0; index < spawnCount; index++)
+        {
+            int candidateIndex = Math.Min(source.Count - 1, (int)Math.Floor(index * stride));
+            selectedSpawnCells.Add(source[candidateIndex].Position);
+        }
+
+        return selectedSpawnCells;
+    }
+
+    private static Dictionary<Vector2I, int> ComputeDistancesFromStart(global::Maze.Model.Maze maze, Cell startCell)
+    {
+        Dictionary<Vector2I, int> distances = new();
+        Queue<Cell> frontier = new();
+        Vector2I start = new(startCell.X, startCell.Y);
+        distances[start] = 0;
+        frontier.Enqueue(startCell);
+
+        while (frontier.Count > 0)
+        {
+            Cell current = frontier.Dequeue();
+            Vector2I currentPosition = new(current.X, current.Y);
+            int nextDistance = distances[currentPosition] + 1;
+
+            foreach (Cell neighbor in GetReachableNeighbors(maze, current))
+            {
+                Vector2I neighborPosition = new(neighbor.X, neighbor.Y);
+                if (distances.ContainsKey(neighborPosition))
                 {
                     continue;
                 }
 
-                return new Vector2I(x, y);
+                distances[neighborPosition] = nextDistance;
+                frontier.Enqueue(neighbor);
             }
         }
 
-        return null;
+        return distances;
+    }
+
+    private static bool IsValidMonsterSpawnCell(global::Maze.Model.Maze maze, Cell candidate, Cell startCell, Cell goalCell)
+    {
+        bool isStart = candidate.X == startCell.X && candidate.Y == startCell.Y;
+        bool isGoal = candidate.X == goalCell.X && candidate.Y == goalCell.Y;
+        return !isStart && !isGoal && HasOpenNeighbor(maze, candidate);
+    }
+
+    private static bool HasOpenNeighbor(global::Maze.Model.Maze maze, Cell cell)
+    {
+        foreach (Direction direction in All)
+        {
+            if (cell.HasWall(direction))
+            {
+                continue;
+            }
+
+            Cell? neighbor = maze.GetNeighbor(cell, direction);
+            if (neighbor is not null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<Cell> GetReachableNeighbors(global::Maze.Model.Maze maze, Cell cell)
+    {
+        foreach (Direction direction in All)
+        {
+            if (cell.HasWall(direction))
+            {
+                continue;
+            }
+
+            Cell? neighbor = maze.GetNeighbor(cell, direction);
+            if (neighbor is not null)
+            {
+                yield return neighbor;
+            }
+        }
     }
 
     private bool IsGameplayState() =>
