@@ -13,6 +13,8 @@ public partial class MonsterController : Node3D
     {
         Idle,
         Wander,
+        Chase,
+        Search,
         Moving
     }
 
@@ -22,6 +24,7 @@ public partial class MonsterController : Node3D
     [Export] public float MoveSpeedCellsPerSecond { get; set; } = 1.35f;
     [Export] public float PauseBetweenMoves { get; set; } = 0.3f;
     [Export] public int MaxSightRangeCells { get; set; } = 13;
+    [Export] public float SearchDurationSeconds { get; set; } = 1.6f;
 
     private global::Maze.Model.Maze? _maze;
     private Vector2I? _playerCell;
@@ -34,6 +37,7 @@ public partial class MonsterController : Node3D
     private float _moveElapsed;
     private float _moveDuration;
     private bool _isMoving;
+    private float _searchElapsed;
     private Vector2I? _previousCell;
 
     public Vector2I SpawnCell { get; private set; }
@@ -54,6 +58,7 @@ public partial class MonsterController : Node3D
     {
         _hoverTime += (float)delta * HoverSpeed;
         UpdatePlayerVisibility();
+        UpdateBehaviorState((float)delta);
 
         if (_isMoving)
         {
@@ -84,7 +89,10 @@ public partial class MonsterController : Node3D
         _moveElapsed = 0f;
         _moveDuration = 0f;
         _isMoving = false;
+        _searchElapsed = 0f;
         _previousCell = null;
+        CanSeePlayerNow = false;
+        LastSeenPlayerCell = null;
         _basePosition = CellToWorld(spawnCell);
         Position = _basePosition;
     }
@@ -109,6 +117,7 @@ public partial class MonsterController : Node3D
         SetProcess(false);
         _isMoving = false;
         _pauseElapsed = 0f;
+        _searchElapsed = 0f;
         CurrentState = MonsterState.Idle;
         Position = _basePosition;
     }
@@ -127,8 +136,9 @@ public partial class MonsterController : Node3D
         _isMoving = false;
         _moveElapsed = 0f;
         _pauseElapsed = 0f;
-        CurrentState = MonsterState.Wander;
         _basePosition = _moveTargetPosition;
+        UpdatePlayerVisibility();
+        UpdateBehaviorState(0f);
         CellChanged?.Invoke(this, CurrentCell);
     }
 
@@ -140,6 +150,20 @@ public partial class MonsterController : Node3D
         }
 
         Cell currentCell = _maze.GetCell(CurrentCell.X, CurrentCell.Y);
+        if (CanSeePlayerNow && _playerCell is Vector2I playerCell && AdvanceAlongPath(playerCell, MonsterState.Chase))
+        {
+            return;
+        }
+
+        if (!CanSeePlayerNow
+            && LastSeenPlayerCell is Vector2I lastSeenPlayerCell
+            && _searchElapsed > 0f
+            && lastSeenPlayerCell != CurrentCell
+            && AdvanceAlongPath(lastSeenPlayerCell, MonsterState.Search))
+        {
+            return;
+        }
+
         List<Cell> reachableNeighbors = GetReachableNeighbors(_maze, currentCell);
         if (reachableNeighbors.Count == 0)
         {
@@ -147,6 +171,11 @@ public partial class MonsterController : Node3D
         }
 
         Cell nextCell = SelectWanderNeighbor(reachableNeighbors);
+        StartMove(nextCell, MonsterState.Wander);
+    }
+
+    private void StartMove(Cell nextCell, MonsterState nextState)
+    {
         _previousCell = CurrentCell;
         CurrentCell = new Vector2I(nextCell.X, nextCell.Y);
         _moveStartPosition = _basePosition;
@@ -154,8 +183,21 @@ public partial class MonsterController : Node3D
         _moveDuration = 1f / Mathf.Max(0.1f, MoveSpeedCellsPerSecond);
         _moveElapsed = 0f;
         _isMoving = true;
-        CurrentState = MonsterState.Moving;
+        CurrentState = nextState;
         FaceMovementDirection(_moveTargetPosition - _moveStartPosition);
+    }
+
+    private bool AdvanceAlongPath(Vector2I targetCell, MonsterState nextState)
+    {
+        List<Vector2I> path = FindPathToPlayer(CurrentCell, targetCell);
+        if (path.Count < 2)
+        {
+            return false;
+        }
+
+        Vector2I nextCell = path[1];
+        StartMove(_maze!.GetCell(nextCell.X, nextCell.Y), nextState);
+        return true;
     }
 
     private Cell SelectWanderNeighbor(List<Cell> reachableNeighbors)
@@ -202,10 +244,44 @@ public partial class MonsterController : Node3D
         }
 
         LastSeenPlayerCell = playerCell;
+        _searchElapsed = SearchDurationSeconds;
         if (!_isMoving)
         {
             FaceMovementDirection(CellToWorld(playerCell) - _basePosition);
         }
+    }
+
+    private void UpdateBehaviorState(float delta)
+    {
+        if (CanSeePlayerNow)
+        {
+            CurrentState = MonsterState.Chase;
+            return;
+        }
+
+        if (LastSeenPlayerCell is not Vector2I lastSeenPlayerCell)
+        {
+            CurrentState = MonsterState.Wander;
+            return;
+        }
+
+        if (lastSeenPlayerCell == CurrentCell)
+        {
+            LastSeenPlayerCell = null;
+            _searchElapsed = 0f;
+            CurrentState = MonsterState.Wander;
+            return;
+        }
+
+        if (_searchElapsed > 0f)
+        {
+            _searchElapsed = Mathf.Max(0f, _searchElapsed - delta);
+            CurrentState = MonsterState.Search;
+            return;
+        }
+
+        LastSeenPlayerCell = null;
+        CurrentState = MonsterState.Wander;
     }
 
     private bool CanSeePlayer(Vector2I monsterCell, Vector2I playerCell, int maxRangeCells)
@@ -216,6 +292,52 @@ public partial class MonsterController : Node3D
         }
 
         return CanSeePlayer(_maze, monsterCell, playerCell, maxRangeCells);
+    }
+
+    private List<Vector2I> FindPathToPlayer(Vector2I startCell, Vector2I playerCell)
+    {
+        if (_maze is null || !_maze.IsInside(startCell.X, startCell.Y) || !_maze.IsInside(playerCell.X, playerCell.Y))
+        {
+            return new List<Vector2I>();
+        }
+
+        if (startCell == playerCell)
+        {
+            return new List<Vector2I> { startCell };
+        }
+
+        PriorityQueue<Vector2I, int> frontier = new();
+        Dictionary<Vector2I, Vector2I> cameFrom = new();
+        Dictionary<Vector2I, int> costSoFar = new() { [startCell] = 0 };
+
+        frontier.Enqueue(startCell, 0);
+        cameFrom[startCell] = startCell;
+
+        while (frontier.Count > 0)
+        {
+            Vector2I current = frontier.Dequeue();
+            if (current == playerCell)
+            {
+                return ReconstructPath(cameFrom, startCell, playerCell);
+            }
+
+            Cell currentCell = _maze.GetCell(current.X, current.Y);
+            foreach (Cell neighbor in GetReachableNeighbors(_maze, currentCell))
+            {
+                Vector2I neighborCell = new(neighbor.X, neighbor.Y);
+                int nextCost = costSoFar[current] + 1;
+                if (costSoFar.TryGetValue(neighborCell, out int existingCost) && existingCost <= nextCost)
+                {
+                    continue;
+                }
+
+                costSoFar[neighborCell] = nextCost;
+                cameFrom[neighborCell] = current;
+                frontier.Enqueue(neighborCell, nextCost + GetHeuristicCost(neighborCell, playerCell));
+            }
+        }
+
+        return new List<Vector2I>();
     }
 
     private static bool CanSeePlayer(global::Maze.Model.Maze maze, Vector2I monsterCell, Vector2I playerCell, int maxRangeCells)
@@ -266,6 +388,30 @@ public partial class MonsterController : Node3D
 
         return false;
     }
+
+    private static List<Vector2I> ReconstructPath(Dictionary<Vector2I, Vector2I> cameFrom, Vector2I startCell, Vector2I goalCell)
+    {
+        if (!cameFrom.ContainsKey(goalCell))
+        {
+            return new List<Vector2I>();
+        }
+
+        List<Vector2I> path = new();
+        Vector2I current = goalCell;
+        path.Add(current);
+
+        while (current != startCell)
+        {
+            current = cameFrom[current];
+            path.Add(current);
+        }
+
+        path.Reverse();
+        return path;
+    }
+
+    private static int GetHeuristicCost(Vector2I from, Vector2I to) =>
+        Math.Abs(from.X - to.X) + Math.Abs(from.Y - to.Y);
 
     private static List<Cell> GetReachableNeighbors(global::Maze.Model.Maze maze, Cell cell)
     {
