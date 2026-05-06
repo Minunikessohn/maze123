@@ -15,6 +15,7 @@ public sealed class GameSessionState
     public Cell? StartCell { get; set; }
     public Cell? GoalCell { get; set; }
     public List<Vector2I> MonsterSpawnCells { get; } = new();
+    public List<TrapDefinition> TrapDefinitions { get; } = new();
     public List<Vector2I> ActiveMonsterCells { get; } = new();
     public List<Vector2I> ActiveTrapCells { get; } = new();
     public float DayNightProgress { get; set; }
@@ -34,6 +35,7 @@ public sealed class GameSessionState
         StartCell = null;
         GoalCell = null;
         MonsterSpawnCells.Clear();
+        TrapDefinitions.Clear();
         ActiveMonsterCells.Clear();
         ActiveTrapCells.Clear();
         DayNightProgress = 0f;

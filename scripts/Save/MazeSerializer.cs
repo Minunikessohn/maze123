@@ -16,7 +16,7 @@ public sealed class MazeSerializer
         global::Maze.Model.Maze maze,
         Cell? startCell = null,
         Cell? goalCell = null,
-        IEnumerable<Vector2I>? trapCells = null,
+        IEnumerable<TrapDefinition>? trapDefinitions = null,
         IEnumerable<Vector2I>? monsterSpawnCells = null)
     {
         Cell resolvedStart = startCell ?? maze.GetCell(0, 0);
@@ -44,13 +44,15 @@ public sealed class MazeSerializer
             });
         }
 
-        if (trapCells is not null)
+        if (trapDefinitions is not null)
         {
-            foreach (Vector2I cell in trapCells)
+            foreach (TrapDefinition trap in trapDefinitions)
             {
                 saveData.Traps.Add(new TrapSaveData
                 {
-                    Cell = MazePointSaveData.FromVector2I(cell)
+                    TrapId = string.IsNullOrWhiteSpace(trap.TrapId) ? TrapDefinition.DefaultTrapId : trap.TrapId.Trim(),
+                    Cell = MazePointSaveData.FromVector2I(trap.Cell),
+                    IsArmed = trap.IsArmed
                 });
             }
         }

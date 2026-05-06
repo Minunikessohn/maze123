@@ -49,6 +49,7 @@ public sealed class MazePointSaveData
 
 public sealed class TrapSaveData
 {
-    public string TrapId { get; set; } = "trap";
+    public string TrapId { get; set; } = TrapDefinition.DefaultTrapId;
     public MazePointSaveData Cell { get; set; } = new();
+    public bool IsArmed { get; set; } = true;
 }

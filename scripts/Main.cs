@@ -808,7 +808,7 @@ public partial class Main : Node
                 _currentMaze,
                 ResolveStartCell(_currentMaze),
                 ResolveGoalCell(_currentMaze),
-                _sessionState.ActiveTrapCells,
+                GetTrapDefinitionsForSave(),
                 _sessionState.MonsterSpawnCells);
 
             _saveGameService.SaveMaze(saveData);
@@ -843,7 +843,8 @@ public partial class Main : Node
             _random = new Random(_currentGameConfig.Seed);
 
             _sessionState.ResetForNewGame(_currentGameConfig, _currentMaze);
-            _sessionState.ActiveTrapCells.AddRange(ConvertTrapCells(saveData));
+            _sessionState.TrapDefinitions.AddRange(ConvertTrapDefinitions(saveData));
+            _sessionState.ActiveTrapCells.AddRange(GetArmedTrapCells(_sessionState.TrapDefinitions));
             _sessionState.MonsterSpawnCells.AddRange(ConvertMonsterCells(saveData));
             _sessionState.StartCell = ResolveSavePoint(_currentMaze, saveData.StartCell, 0, 0);
             _sessionState.GoalCell = ResolveSavePoint(_currentMaze, saveData.GoalCell, _currentMaze.Width - 1, _currentMaze.Height - 1);
@@ -903,13 +904,67 @@ public partial class Main : Node
         return maze.GetCell(fallbackX, fallbackY);
     }
 
-    private static List<Vector2I> ConvertTrapCells(MazeSaveData saveData)
+    private List<TrapDefinition> GetTrapDefinitionsForSave()
     {
-        List<Vector2I> cells = new(saveData.Traps.Count);
+        if (_sessionState.TrapDefinitions.Count > 0)
+        {
+            HashSet<Vector2I> armedCells = new(_sessionState.ActiveTrapCells);
+            List<TrapDefinition> definitions = new(_sessionState.TrapDefinitions.Count);
+
+            foreach (TrapDefinition trap in _sessionState.TrapDefinitions)
+            {
+                definitions.Add(new TrapDefinition
+                {
+                    TrapId = trap.TrapId,
+                    Cell = trap.Cell,
+                    IsArmed = armedCells.Contains(trap.Cell)
+                });
+            }
+
+            return definitions;
+        }
+
+        List<TrapDefinition> fallbackDefinitions = new(_sessionState.ActiveTrapCells.Count);
+
+        foreach (Vector2I cell in _sessionState.ActiveTrapCells)
+        {
+            fallbackDefinitions.Add(new TrapDefinition
+            {
+                Cell = cell,
+                IsArmed = true
+            });
+        }
+
+        return fallbackDefinitions;
+    }
+
+    private static List<TrapDefinition> ConvertTrapDefinitions(MazeSaveData saveData)
+    {
+        List<TrapDefinition> definitions = new(saveData.Traps.Count);
 
         foreach (TrapSaveData trap in saveData.Traps)
         {
-            cells.Add(trap.Cell.ToVector2I());
+            definitions.Add(new TrapDefinition
+            {
+                TrapId = string.IsNullOrWhiteSpace(trap.TrapId) ? TrapDefinition.DefaultTrapId : trap.TrapId.Trim(),
+                Cell = trap.Cell.ToVector2I(),
+                IsArmed = trap.IsArmed
+            });
+        }
+
+        return definitions;
+    }
+
+    private static List<Vector2I> GetArmedTrapCells(IEnumerable<TrapDefinition> trapDefinitions)
+    {
+        List<Vector2I> cells = new();
+
+        foreach (TrapDefinition trap in trapDefinitions)
+        {
+            if (trap.IsArmed)
+            {
+                cells.Add(trap.Cell);
+            }
         }
 
         return cells;
