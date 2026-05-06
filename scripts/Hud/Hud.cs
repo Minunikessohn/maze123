@@ -269,4 +269,10 @@ public partial class Hud : CanvasLayer
 
     public void SetUse3DActive(bool active) =>
         _viewToggle.SetPressedNoSignal(active);
+
+    public void SetPauseActive(bool active)
+    {
+        _pauseButton.SetPressedNoSignal(active);
+        _pauseButton.Text = active ? "Fortsetzen" : "Pause";
+    }
 }

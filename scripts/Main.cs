@@ -23,6 +23,7 @@ public partial class Main : Node
     private StatsPanel _stats = null!;
     private MazeView2D _view2D = null!;
     private MazeView3D _view3D = null!;
+    private CameraController3D _camera3D = null!;
     private PlayerCharacter3D _player = null!;
     private AlgorithmRunner _runner = null!;
     private SaveGameService _saveGameService = null!;
@@ -55,6 +56,7 @@ public partial class Main : Node
     private readonly PerformanceTracker _tracker = new();
     private MazeGameConfig? _currentGameConfig;
     private readonly GameSessionState _sessionState = new();
+    private GameFlowState _flowState = GameFlowState.Boot;
     private bool _suppressViewRefresh;
     private bool _userRequestedUnboundedMode;
     private bool _followCamEnabled;
@@ -70,6 +72,7 @@ public partial class Main : Node
         _stats = GetNode<StatsPanel>("Hud/StatsPanel");
         _view2D = GetNode<MazeView2D>("MazeView2D");
         _view3D = GetNode<MazeView3D>("MazeView3D");
+        _camera3D = _view3D.GetNode<CameraController3D>("Camera3D");
         _player = GetNode<PlayerCharacter3D>("MazeView3D/Player");
         _runner = GetNode<AlgorithmRunner>("Runner");
         _saveGameService = new SaveGameService();
@@ -79,8 +82,6 @@ public partial class Main : Node
         _mainMenu.DeleteMazeRequested += OnDeleteMazeRequested;
         _mainMenu.SetGeneratorOptions(BuildGeneratorMenuItems());
         RefreshSaveSlots();
-
-        ShowMainMenu();
 
         _hud.GenerateRequested += OnGenerateRequested;
         _hud.SolveRequested += OnSolveRequested;
@@ -102,7 +103,7 @@ public partial class Main : Node
         _runner.SolverStepProduced += OnSolverStepProduced;
         _runner.SolverFinished += OnSolverFinished;
         ApplySimulationSpeed(DefaultStepsPerSecond);
-        ApplyEffectiveRunnerMode();
+        TransitionToState(GameFlowState.MainMenu);
 
         GD.Print("[Main] HUD, 2D-View und 3D-View verbunden.");
     }
@@ -117,7 +118,9 @@ public partial class Main : Node
 
     public override void _UnhandledInput(InputEvent @event)
     {
-        if (@event is InputEventKey { Pressed: true, Keycode: Key.Space } && _runner.IsPaused)
+        if (_flowState == GameFlowState.Paused
+            && @event is InputEventKey { Pressed: true, Keycode: Key.Space }
+            && _runner.IsPaused)
         {
             _runner.ForceSingleStep();
         }
@@ -128,7 +131,11 @@ public partial class Main : Node
     private void OnGenerateRequested(int width, int height, string generatorId)
     {
         _pendingSaveDisplayName = string.Empty;
-        _ = StartNewGame(MazeGameConfig.CreateDefault(width, height, generatorId));
+
+        if (StartNewGame(MazeGameConfig.CreateDefault(width, height, generatorId)))
+        {
+            TransitionToState(GameFlowState.Loading);
+        }
     }
 
     private bool StartNewGame(MazeGameConfig config)
@@ -152,7 +159,7 @@ public partial class Main : Node
         _player.Hide();
         _view3D.ClearTrail();
         ResetExploreMode();
-        _view3D.GetNode<CameraController3D>("Camera3D").DisableFollow();
+        _camera3D.DisableFollow();
         _currentMaze = new global::Maze.Model.Maze(sanitizedConfig.Width, sanitizedConfig.Height);
         _sessionState.ResetForNewGame(sanitizedConfig, _currentMaze);
         _lastMazeBuiltFor3D = null;
@@ -174,25 +181,29 @@ public partial class Main : Node
             return;
         }
 
-        ShowGameplay();
+        TransitionToState(GameFlowState.Loading);
     }
 
     private void OnLoadMazeRequested(string saveId)
     {
+        TransitionToState(GameFlowState.Loading);
+
         MazeSaveData? saveData = _saveGameService.LoadMaze(saveId);
         if (saveData is null)
         {
             GD.PrintErr($"[Main] Save konnte nicht geladen werden: {saveId}");
+            TransitionToState(GameFlowState.MainMenu);
             RefreshSaveSlots();
             return;
         }
 
         if (!TryLoadMaze(saveData))
         {
+            TransitionToState(GameFlowState.MainMenu);
             return;
         }
 
-        ShowGameplay();
+        TransitionToState(GameFlowState.Playing);
     }
 
     private void OnDeleteMazeRequested(string saveId)
@@ -244,7 +255,6 @@ public partial class Main : Node
         _view3D.SetMaze(_currentMaze);
         _lastMazeBuiltFor3D = _currentMaze;
         _sessionState.IsRunning = true;
-        _sessionState.IsPaused = false;
         _sessionState.GoalReached = false;
         _sessionState.StartCell = _currentMaze.GetCell(0, 0);
         _sessionState.GoalCell = _currentMaze.GetCell(_currentMaze.Width - 1, _currentMaze.Height - 1);
@@ -252,10 +262,11 @@ public partial class Main : Node
         _stats.UpdateStats(_tracker.Elapsed, _tracker.Steps, _tracker.VisitedCells, 0, _tracker.ManagedMemoryDeltaBytes);
         TrySaveCurrentMaze();
 
+        TransitionToState(GameFlowState.Playing);
+
         if (!IsSandboxMode())
         {
             OnPlayManualRequested();
-            EnforceNormalModeView();
         }
 
         GD.Print("[Main] Generator fertig.");
@@ -289,7 +300,7 @@ public partial class Main : Node
         _player.Hide();
         _view3D.ClearTrail();
         ResetExploreMode();
-        _view3D.GetNode<CameraController3D>("Camera3D").DisableFollow();
+        _camera3D.DisableFollow();
         _solverStart = ResolveStartCell(_currentMaze);
         _solverGoal = ResolveGoalCell(_currentMaze);
         _sessionState.StartCell = _solverStart;
@@ -374,7 +385,7 @@ public partial class Main : Node
         _player.StartFollowingPath(fullPath, _view3D.CellSize);
         if (_followCamEnabled)
         {
-            _view3D.GetNode<CameraController3D>("Camera3D").EnableFollow(_player);
+            _camera3D.EnableFollow(_player);
         }
     }
 
@@ -383,8 +394,13 @@ public partial class Main : Node
 
     private void OnPauseToggled(bool paused)
     {
-        _runner.IsPaused = paused;
-        _sessionState.IsPaused = paused;
+        if (!IsGameplayState())
+        {
+            _hud.SetPauseActive(false);
+            return;
+        }
+
+        TransitionToState(paused ? GameFlowState.Paused : GameFlowState.Playing);
     }
 
     private void OnStepRequested() =>
@@ -404,7 +420,7 @@ public partial class Main : Node
         _player.Hide();
         _view3D.ClearTrail();
         ResetExploreMode();
-        _view3D.GetNode<CameraController3D>("Camera3D").DisableFollow();
+        _camera3D.DisableFollow();
 
         if (_currentMaze is null)
         {
@@ -414,7 +430,7 @@ public partial class Main : Node
 
         _currentMaze.ResetSolverState();
         _sessionState.GoalReached = false;
-        _sessionState.IsPaused = false;
+        TransitionToState(GameFlowState.Playing);
         _view2D.ForceRefresh();
         _view3D.Refresh();
         _stats.UpdateStats(TimeSpan.Zero, 0, 0, 0, 0);
@@ -475,20 +491,19 @@ public partial class Main : Node
         {
             _followCamEnabled = true;
             _hud.SetFollowCamActive(true);
-            _view3D.GetNode<CameraController3D>("Camera3D").EnableFollow(_player);
+            _camera3D.EnableFollow(_player);
             return;
         }
 
         _followCamEnabled = enabled;
 
-        CameraController3D camera = _view3D.GetNode<CameraController3D>("Camera3D");
         if (enabled && _player.Visible)
         {
-            camera.EnableFollow(_player);
+            _camera3D.EnableFollow(_player);
             return;
         }
 
-        camera.DisableFollow();
+        _camera3D.DisableFollow();
     }
 
     private void OnUnboundedModeChanged(bool unbounded)
@@ -583,8 +598,7 @@ public partial class Main : Node
         _hud.SetUse3DActive(true);
         OnViewToggled(true);
 
-        CameraController3D camera = _view3D.GetNode<CameraController3D>("Camera3D");
-        _player.EnableManualMode(_currentMaze, _solverStart, _solverGoal, _view3D.CellSize, camera);
+        _player.EnableManualMode(_currentMaze, _solverStart, _solverGoal, _view3D.CellSize, _camera3D);
         _isManualMode = true;
         _sessionState.IsManualMode = true;
         _manualStartTimeSeconds = Time.GetTicksMsec() / 1000.0;
@@ -593,7 +607,7 @@ public partial class Main : Node
         _followCamEnabledBeforeManual = _followCamEnabled;
         _followCamEnabled = true;
         _hud.SetFollowCamActive(true);
-        camera.EnableFollow(_player, true);
+        _camera3D.EnableFollow(_player, true);
 
         GD.Print("[Main] Selbst spielen aktiviert.");
     }
@@ -620,8 +634,7 @@ public partial class Main : Node
         _isManualMode = false;
         _sessionState.IsManualMode = false;
 
-        CameraController3D camera = _view3D.GetNode<CameraController3D>("Camera3D");
-        camera.DisableFollow();
+        _camera3D.DisableFollow();
 
         _followCamEnabled = _followCamEnabledBeforeManual;
         ApplyEffectiveRunnerMode();
@@ -699,7 +712,7 @@ public partial class Main : Node
             _player.Hide();
             _view3D.ClearTrail();
             ResetExploreMode();
-            _view3D.GetNode<CameraController3D>("Camera3D").DisableFollow();
+            _camera3D.DisableFollow();
 
             _currentGameConfig = saveData.Config.Clone().Sanitize();
             _currentMaze = _mazeSerializer.DeserializeMaze(saveData);
@@ -721,7 +734,6 @@ public partial class Main : Node
             if (!IsSandboxMode())
             {
                 OnPlayManualRequested();
-                EnforceNormalModeView();
             }
 
             GD.Print($"[Main] Save geladen: {saveData.SaveId}");
@@ -799,41 +811,65 @@ public partial class Main : Node
         return items;
     }
 
-    private void ShowMainMenu()
+    private void TransitionToState(GameFlowState newState)
     {
-        _mainMenu.Visible = true;
-        _hud.Visible = false;
-        _view2D.Visible = false;
-        _view3D.Visible = false;
+        if (_flowState == newState)
+        {
+            ApplyStatePresentation();
+            return;
+        }
+
+        _flowState = newState;
+        _sessionState.FlowState = newState;
+        _sessionState.IsPaused = newState == GameFlowState.Paused;
+
+        if (newState is GameFlowState.Boot or GameFlowState.MainMenu)
+        {
+            _sessionState.IsRunning = false;
+        }
+
+        ApplyStatePresentation();
+        GD.Print($"[Main] Zustand gewechselt zu {newState}.");
     }
 
-    private void ShowGameplay()
+    private void ApplyStatePresentation()
     {
-        _mainMenu.Visible = false;
+        bool showMainMenu = _flowState == GameFlowState.MainMenu;
+        bool showGameplay = _flowState is GameFlowState.Loading or GameFlowState.Playing or GameFlowState.Paused;
         bool sandboxMode = IsSandboxMode();
 
-        _hud.Visible = sandboxMode;
-        _hud.SetUse3DActive(!sandboxMode);
-        _view2D.Visible = sandboxMode;
-        _view3D.Visible = !sandboxMode;
-        EnforceNormalModeView();
+        _mainMenu.Visible = showMainMenu;
+        _hud.Visible = showGameplay && sandboxMode;
+        _hud.SetPauseActive(_flowState == GameFlowState.Paused);
+
+        if (!sandboxMode)
+        {
+            _hud.SetUse3DActive(true);
+        }
+
+        _view2D.Visible = showGameplay && sandboxMode;
+        _view3D.Visible = showGameplay && !sandboxMode;
+
+        bool gameplayInputEnabled = _flowState == GameFlowState.Playing;
+        _player.SetProcess(gameplayInputEnabled);
+        _camera3D.SetProcess(gameplayInputEnabled && _view3D.Visible);
+        _camera3D.SetProcessUnhandledInput(gameplayInputEnabled && _view3D.Visible);
+        _runner.IsPaused = _flowState is GameFlowState.Boot or GameFlowState.MainMenu or GameFlowState.Paused;
+
+        if (!gameplayInputEnabled)
+        {
+            Input.MouseMode = Input.MouseModeEnum.Visible;
+        }
+
+        ApplyEffectiveRunnerMode();
     }
+
+    private bool IsGameplayState() =>
+        _flowState is GameFlowState.Loading or GameFlowState.Playing or GameFlowState.Paused;
 
     private bool IsSandboxMode() =>
         _currentGameConfig?.SandboxModeEnabled ?? true;
 
     private bool IsNormalMode() =>
         !IsSandboxMode();
-
-    private void EnforceNormalModeView()
-    {
-        if (!IsNormalMode())
-        {
-            return;
-        }
-
-        _hud.Visible = false;
-        _view2D.Visible = false;
-        _view3D.Visible = true;
-    }
 }

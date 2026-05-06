@@ -9,6 +9,7 @@ namespace Maze.Game;
 
 public sealed class GameSessionState
 {
+    public GameFlowState FlowState { get; set; } = GameFlowState.Boot;
     public MazeGameConfig? CurrentConfig { get; private set; }
     public global::Maze.Model.Maze? CurrentMaze { get; private set; }
     public Cell? StartCell { get; set; }
@@ -28,6 +29,7 @@ public sealed class GameSessionState
     {
         CurrentConfig = config.Clone().Sanitize();
         CurrentMaze = maze;
+        FlowState = GameFlowState.Loading;
         StartCell = null;
         GoalCell = null;
         ActiveMonsterCells.Clear();
