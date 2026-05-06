@@ -1005,7 +1005,7 @@ public partial class Main : Node
     }
 
     private void ConfigureMonsterSystem() =>
-        _monsterManager.Configure(_currentGameConfig, _sessionState.MonsterSpawnCells, _view3D.CellSize);
+        _monsterManager.Configure(_currentGameConfig, _currentMaze, _sessionState.MonsterSpawnCells, _view3D.CellSize);
 
     private void SyncDayNightState()
     {

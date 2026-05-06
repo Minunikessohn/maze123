@@ -3,6 +3,7 @@
 using System.Collections.Generic;
 using Godot;
 using Maze.Game;
+using Maze.Model;
 using Maze.World;
 
 namespace Maze.Gameplay.Monster;
@@ -14,10 +15,12 @@ public partial class MonsterManager : Node3D
     private readonly List<Vector2I> _spawnCells = new();
     private readonly List<Vector2I> _activeMonsterCells = new();
     private readonly List<MonsterController> _activeMonsters = new();
+    private readonly Dictionary<MonsterController, int> _monsterIndices = new();
 
     private PackedScene _monsterScene = null!;
     private DayNightController? _dayNightController;
     private MazeGameConfig? _config;
+    private global::Maze.Model.Maze? _maze;
     private float _cellSize = 1f;
 
     public IReadOnlyList<Vector2I> ActiveMonsterCells => _activeMonsterCells;
@@ -57,9 +60,10 @@ public partial class MonsterManager : Node3D
         _dayNightController.NightStarted += OnNightStarted;
     }
 
-    public void Configure(MazeGameConfig? config, IEnumerable<Vector2I> spawnCells, float cellSize)
+    public void Configure(MazeGameConfig? config, global::Maze.Model.Maze? maze, IEnumerable<Vector2I> spawnCells, float cellSize)
     {
         _config = config;
+        _maze = maze;
         _cellSize = Mathf.Max(0.1f, cellSize);
         _spawnCells.Clear();
 
@@ -97,6 +101,7 @@ public partial class MonsterManager : Node3D
 
     private bool CanSpawnMonsters() =>
         _config is not null
+        && _maze is not null
         && _config.MonsterGenerationEnabled
         && _spawnCells.Count > 0;
 
@@ -113,10 +118,12 @@ public partial class MonsterManager : Node3D
         {
             MonsterController monster = _monsterScene.Instantiate<MonsterController>();
             AddChild(monster);
-            monster.Configure(spawnCell, _cellSize, _config?.MonsterCanBeStunned ?? false);
+            monster.CellChanged += OnMonsterCellChanged;
+            monster.Configure(_maze!, spawnCell, _cellSize, _config?.MonsterCanBeStunned ?? false);
+            _monsterIndices[monster] = _activeMonsterCells.Count;
+            _activeMonsterCells.Add(monster.CurrentCell);
             monster.ActivateMonster();
             _activeMonsters.Add(monster);
-            _activeMonsterCells.Add(spawnCell);
         }
     }
 
@@ -126,11 +133,23 @@ public partial class MonsterManager : Node3D
         {
             if (IsInstanceValid(monster))
             {
+                monster.CellChanged -= OnMonsterCellChanged;
                 monster.QueueFree();
             }
         }
 
+        _monsterIndices.Clear();
         _activeMonsters.Clear();
         _activeMonsterCells.Clear();
+    }
+
+    private void OnMonsterCellChanged(MonsterController monster, Vector2I cell)
+    {
+        if (!_monsterIndices.TryGetValue(monster, out int index) || index < 0 || index >= _activeMonsterCells.Count)
+        {
+            return;
+        }
+
+        _activeMonsterCells[index] = cell;
     }
 }
