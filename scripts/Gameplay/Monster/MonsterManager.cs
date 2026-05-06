@@ -33,6 +33,7 @@ public partial class MonsterManager : Node3D
     private global::Maze.Model.Maze? _maze;
     private Vector2I? _playerCell;
     private float _cellSize = 1f;
+    private bool _requiresSpawn = true;
 
     public IReadOnlyList<Vector2I> ActiveMonsterCells => _activeMonsterCells;
 
@@ -93,6 +94,7 @@ public partial class MonsterManager : Node3D
         }
 
         DespawnAll();
+        _requiresSpawn = true;
     }
 
     public void Synchronize(MonsterSimulationMode mode)
@@ -100,10 +102,11 @@ public partial class MonsterManager : Node3D
         if (mode == MonsterSimulationMode.Inactive || !CanSpawnMonsters())
         {
             DespawnAll();
+            _requiresSpawn = true;
             return;
         }
 
-        if (_activeMonsters.Count != _spawnCells.Count)
+        if (_requiresSpawn)
         {
             SpawnAll();
         }
@@ -257,6 +260,8 @@ public partial class MonsterManager : Node3D
             monster.ActivateMonster();
             _activeMonsters.Add(monster);
         }
+
+        _requiresSpawn = false;
     }
 
     private void DespawnAll()

@@ -1481,7 +1481,6 @@ public partial class Main : Node
 
         List<(Vector2I Position, int DistanceFromStart, int DistanceFromGoal, int OpenNeighborCount)> shuffledCandidates = new(sourceCandidates);
         ShuffleInPlace(shuffledCandidates, random);
-        shuffledCandidates.Sort(static (left, right) => CompareTrapCandidates(left, right));
 
         foreach ((Vector2I position, _, _, _) in shuffledCandidates)
         {
@@ -1498,25 +1497,6 @@ public partial class Main : Node
             selectedCells.Add(position);
             selectedSet.Add(position);
         }
-    }
-
-    private static int CompareTrapCandidates(
-        (Vector2I Position, int DistanceFromStart, int DistanceFromGoal, int OpenNeighborCount) left,
-        (Vector2I Position, int DistanceFromStart, int DistanceFromGoal, int OpenNeighborCount) right)
-    {
-        int openNeighborComparison = right.OpenNeighborCount.CompareTo(left.OpenNeighborCount);
-        if (openNeighborComparison != 0)
-        {
-            return openNeighborComparison;
-        }
-
-        int goalDistanceComparison = right.DistanceFromGoal.CompareTo(left.DistanceFromGoal);
-        if (goalDistanceComparison != 0)
-        {
-            return goalDistanceComparison;
-        }
-
-        return right.DistanceFromStart.CompareTo(left.DistanceFromStart);
     }
 
     private static bool IsTrapSpacingValid(Vector2I candidate, IEnumerable<Vector2I> selectedCells)
