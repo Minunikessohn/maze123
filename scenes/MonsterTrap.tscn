@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/Gameplay/Traps/TrapInstance.cs" id="1_instance"]
 
@@ -6,6 +6,11 @@
 top_radius = 0.34
 bottom_radius = 0.34
 height = 0.03
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_warning_ring"]
+top_radius = 0.48
+bottom_radius = 0.48
+height = 0.012
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_core"]
 top_radius = 0.14
@@ -16,6 +21,14 @@ height = 0.06
 albedo_color = Color(0.372549, 0.137255, 0.12549, 1)
 metallic = 0.35
 roughness = 0.22
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_warning_ring"]
+transparency = 1
+albedo_color = Color(1, 0.690196, 0.403922, 0.85)
+emission_enabled = true
+emission = Color(1, 0.690196, 0.403922, 1)
+emission_energy_multiplier = 1.45
+roughness = 0.2
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_core"]
 albedo_color = Color(1, 0.439216, 0.262745, 1)
@@ -30,6 +43,11 @@ script = ExtResource("1_instance")
 [node name="Plate" type="MeshInstance3D" parent="."]
 mesh = SubResource("CylinderMesh_plate")
 surface_material_override/0 = SubResource("StandardMaterial3D_plate")
+
+[node name="WarningRing" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.006, 0)
+mesh = SubResource("CylinderMesh_warning_ring")
+surface_material_override/0 = SubResource("StandardMaterial3D_warning_ring")
 
 [node name="Core" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.028, 0)
