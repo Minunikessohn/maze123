@@ -83,6 +83,16 @@ public partial class TrapManager : Node3D
         return true;
     }
 
+    public void NotifyPlayerEnteredCell(Vector2I cell)
+    {
+        if (!_trapInstances.ContainsKey(cell))
+        {
+            return;
+        }
+
+        // Version 1 rule: traps are visible to the player but never affect them.
+    }
+
     private bool CanSpawnTraps() =>
         _config is not null
         && _maze is not null

@@ -650,9 +650,11 @@ public partial class Main : Node
 
     private void OnPlayerCellVisited(int x, int y)
     {
-        _monsterManager.UpdatePlayerCell(new Vector2I(x, y));
+        Vector2I playerCell = new(x, y);
+        _trapManager.NotifyPlayerEnteredCell(playerCell);
+        _monsterManager.UpdatePlayerCell(playerCell);
         _view3D.MarkTrailCell(x, y);
-        _view3D.UpdateMonsterProximity(new Vector2I(x, y));
+        _view3D.UpdateMonsterProximity(playerCell);
     }
 
     private void OnPlayManualToggle(bool active)
