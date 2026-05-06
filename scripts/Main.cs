@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using Godot;
 using Maze.Game;
+using Maze.Gameplay.Monster;
 using Maze.Game.Settings;
 using Maze.Generators;
 using Maze.Model;
@@ -31,6 +32,7 @@ public partial class Main : Node
     private PlayerCharacter3D _player = null!;
     private AlgorithmRunner _runner = null!;
     private DayNightController _dayNightController = null!;
+    private MonsterManager _monsterManager = null!;
     private SaveGameService _saveGameService = null!;
     private global::Maze.Model.Maze? _currentMaze;
     private global::Maze.Model.Maze? _lastMazeBuiltFor3D;
@@ -83,6 +85,7 @@ public partial class Main : Node
         _player = GetNode<PlayerCharacter3D>("MazeView3D/Player");
         _runner = GetNode<AlgorithmRunner>("Runner");
         _dayNightController = GetNode<DayNightController>("DayNightController");
+        _monsterManager = GetNode<MonsterManager>("MazeView3D/MonsterManager");
         _saveGameService = new SaveGameService();
 
         _mainMenu.StartNewMazeRequested += OnStartNewMazeRequested;
@@ -94,6 +97,7 @@ public partial class Main : Node
         _pauseMenu.ReturnToMainMenuRequested += OnReturnToMainMenuRequested;
         _dayNightController.DayStarted += OnDayStarted;
         _dayNightController.NightStarted += OnNightStarted;
+        _monsterManager.BindDayNightController(_dayNightController);
         _pauseMenu.SetVisualSettings(_sessionState.VisualSettings);
         _pauseMenu.SetAudioSettings(_sessionState.AudioSettings);
         RefreshSaveSlots();
@@ -198,6 +202,7 @@ public partial class Main : Node
         _lastMazeBuiltFor3D = null;
         _view2D.SetMaze(_currentMaze);
         _view3D.ClearMaze();
+        ConfigureMonsterSystem();
         SyncDayNightState();
 
         _runner.StartGeneration(generator.Generate(_currentMaze, _random));
@@ -292,6 +297,8 @@ public partial class Main : Node
         _sessionState.GoalReached = false;
         _sessionState.StartCell = _currentMaze.GetCell(0, 0);
         _sessionState.GoalCell = _currentMaze.GetCell(_currentMaze.Width - 1, _currentMaze.Height - 1);
+        EnsurePhase91MonsterSpawnCells();
+        ConfigureMonsterSystem();
         _tracker.Stop();
         _stats.UpdateStats(_tracker.Elapsed, _tracker.Steps, _tracker.VisitedCells, 0, _tracker.ManagedMemoryDeltaBytes);
         TrySaveCurrentMaze();
@@ -832,6 +839,7 @@ public partial class Main : Node
             _sessionState.StartCell = ResolveSavePoint(_currentMaze, saveData.StartCell, 0, 0);
             _sessionState.GoalCell = ResolveSavePoint(_currentMaze, saveData.GoalCell, _currentMaze.Width - 1, _currentMaze.Height - 1);
             _sessionState.IsRunning = true;
+            EnsurePhase91MonsterSpawnCells();
             ConfigureDayNightCycle(_currentGameConfig);
 
             _view2D.SetMaze(_currentMaze);
@@ -839,6 +847,7 @@ public partial class Main : Node
             _view3D.ClearProximityEffects();
             _view3D.SetMaze(_currentMaze);
             _lastMazeBuiltFor3D = _currentMaze;
+            ConfigureMonsterSystem();
             SyncDayNightState();
 
             if (!IsSandboxMode())
@@ -994,19 +1003,22 @@ public partial class Main : Node
         _dayNightController.SetPaused(_flowState != GameFlowState.Playing);
     }
 
+    private void ConfigureMonsterSystem() =>
+        _monsterManager.Configure(_currentGameConfig, _sessionState.ActiveMonsterCells, _view3D.CellSize);
+
     private void SyncDayNightState()
     {
         if (_currentGameConfig is null)
         {
+            _monsterManager.Synchronize(false);
             _view3D.SetMonsterCells(Array.Empty<Vector2I>());
             _view3D.ApplyDayNightState(false, false, MazeGameConfig.DefaultNightViewDistance, 0f, false);
             return;
         }
 
         _sessionState.DayNightProgress = _dayNightController.TimeOfDay;
-        _view3D.SetMonsterCells(ShouldMonstersBeActive()
-            ? _sessionState.ActiveMonsterCells
-            : Array.Empty<Vector2I>());
+        _monsterManager.Synchronize(ShouldMonstersBeActive());
+        _view3D.SetMonsterCells(_monsterManager.ActiveMonsterCells);
         _view3D.ApplyDayNightState(
             _currentGameConfig.DayNightCycleEnabled,
             _currentGameConfig.DarkModeEnabled,
@@ -1022,12 +1034,58 @@ public partial class Main : Node
             return false;
         }
 
+        if (_flowState != GameFlowState.Playing)
+        {
+            return false;
+        }
+
         if (!_currentGameConfig.MonstersOnlyAtNight)
         {
             return true;
         }
 
         return _currentGameConfig.DayNightCycleEnabled && _dayNightController.IsNight;
+    }
+
+    private void EnsurePhase91MonsterSpawnCells()
+    {
+        if (_currentMaze is null || _currentGameConfig is null || !_currentGameConfig.MonsterGenerationEnabled)
+        {
+            return;
+        }
+
+        if (_sessionState.ActiveMonsterCells.Count > 0)
+        {
+            return;
+        }
+
+        Cell startCell = ResolveStartCell(_currentMaze);
+        Cell goalCell = ResolveGoalCell(_currentMaze);
+        Vector2I? spawnCell = FindPhase91MonsterSpawnCell(_currentMaze, startCell, goalCell);
+        if (spawnCell is Vector2I cell)
+        {
+            _sessionState.ActiveMonsterCells.Add(cell);
+        }
+    }
+
+    private static Vector2I? FindPhase91MonsterSpawnCell(global::Maze.Model.Maze maze, Cell startCell, Cell goalCell)
+    {
+        for (int y = maze.Height - 1; y >= 0; y--)
+        {
+            for (int x = maze.Width - 1; x >= 0; x--)
+            {
+                bool isStart = x == startCell.X && y == startCell.Y;
+                bool isGoal = x == goalCell.X && y == goalCell.Y;
+                if (isStart || isGoal)
+                {
+                    continue;
+                }
+
+                return new Vector2I(x, y);
+            }
+        }
+
+        return null;
     }
 
     private bool IsGameplayState() =>

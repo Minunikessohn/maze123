@@ -6,6 +6,7 @@
 [ext_resource type="Script" path="res://scripts/Views/LegoFigure.cs" id="4_lego"]
 [ext_resource type="Texture2D" path="res://assets/devedse.png" id="5_atlas"]
 [ext_resource type="PackedScene" path="res://scenes/MonsterProximityOverlay.tscn" id="6_overlay"]
+[ext_resource type="Script" path="res://scripts/Gameplay/Monster/MonsterManager.cs" id="7_monstermanager"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_horizontal"]
 size = Vector3(1, 1.4, 0.1)
@@ -65,6 +66,9 @@ shadow_enabled = true
 environment = SubResource("Environment_explore")
 
 [node name="MonsterProximityOverlay" parent="." instance=ExtResource("6_overlay")]
+
+[node name="MonsterManager" type="Node3D" parent="."]
+script = ExtResource("7_monstermanager")
 
 [node name="Floor" type="MeshInstance3D" parent="."]
 

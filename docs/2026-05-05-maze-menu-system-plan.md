@@ -357,7 +357,7 @@ Ziel: Ein zentrales System, das Licht, Sichtweite und Monster-Aktivierung koppel
 
 Ziel: Monster als Nacht-Gameplay mit optionalem Stun.
 
-**Neue Dateien:**
+**Neue Dateien ueber die Teilphasen verteilt:**
 
 - `scripts/Gameplay/Monster/MonsterController.cs`
 - `scripts/Gameplay/Monster/MonsterManager.cs`
@@ -369,28 +369,163 @@ Ziel: Monster als Nacht-Gameplay mit optionalem Stun.
 - Monster werden nur sichtbar oder aktiv, wenn Nacht ist.
 - Monster duerfen tagsueber nicht spawnen oder muessen deaktiviert werden.
 - Monster koennen nur dann gestunnt werden, wenn `MonsterCanBeStunned == true`.
+- Monster sollen im Durchschnitt in `4%` der begehbaren Zellen spawnen.
+- Monster duerfen niemals durch Waende oder diagonal durch gesperrte Zellkanten laufen.
 
 **Kernregel dieses Plans:** Monster nur nachts erscheinen.
 
-Das bedeutet fuer die Implementierung konkret:
+Damit die Umsetzung nicht zu gross wird, sollte Phase 9 in kleinere Zwischenschritte aufgeteilt werden.
 
-- `MonsterManager` subscribt auf `DayNightController`.
-- Bei `NightStarted`: Monster aktivieren oder spawnen.
-- Bei `DayStarted`: Monster deaktivieren, verstecken oder despawnen.
-- Proximity-Effekte werden nur gegen aktuell aktive Nacht-Monster berechnet.
+### Phase 9.1 — Monster-Grundgeruest und Nacht-Aktivierung
 
-**Spawn-Strategien fuer die erste Version:**
+Ziel: Ein minimales Monster-System schaffen, das sauber an den Tag-Nacht-Zyklus angebunden ist, aber noch keine echte KI braucht.
 
-- Monster in weit entfernten Zellen vom Start
-- bevorzugt in Sackgassen oder Randzonen
-- nie auf Start- oder Zielzelle
-- Spawnpunkte direkt nach der Maze-Generierung berechnen und speichern
+**Umfang:**
+
+- `MonsterManager` als zentralen Einstiegspunkt anlegen.
+- `Monster.tscn` als einfache Platzhalter-Szene anlegen.
+- `MonsterController` mit Minimalzustand `Idle` vorbereiten.
+- `MonsterManager` auf `DayNightController` subscriben.
+- Bei `NightStarted`: Monster aktivieren oder erzeugen.
+- Bei `DayStarted`: Monster deaktivieren oder despawnen.
+- Proximity-Effekte nur gegen aktuell aktive Nacht-Monster berechnen.
+
+**Ergebnis nach diesem Schritt:**
+
+- Es gibt sichtbare oder logisch registrierte Monster nur waehrend der Nacht.
+- Tagsueber existiert kein aktives Monster-Gameplay.
+
+### Phase 9.2 — Spawnlogik und Spawnpunkte sauber einfuehren
+
+Ziel: Monster in reproduzierbarer Anzahl und an gueltigen Positionen erzeugen.
+
+**Umfang:**
+
+- Spawnanzahl aus der Maze ableiten: `spawnCount = max(1, round(begehbareZellen * 0.04))`, sofern Monster aktiviert sind.
+- Nur begehbare Zellen ohne Wandblockade zum Zentrum der Nachbarzellen als Spawnpunkte zulassen.
+- Monster in etwas entfernten Zellen vom Start spawnen, damit der Spieler nicht direkt beim Nachtwechsel getroffen wird.
+- Nie auf Start- oder Zielzelle spawnen.
+- Spawnpunkte direkt nach der Maze-Generierung berechnen und speichern, damit Saves reproduzierbar bleiben.
+- Optional fuer spaeter: Mindestabstand zwischen Monstern, damit nicht mehrere Gegner auf derselben Region clustern.
+
+**Noetige Hilfsfunktion in diesem Schritt:**
+
+- `ComputeMonsterSpawnCells(Maze maze, Vector2I startCell, Vector2I goalCell)`
+
+**Ergebnis nach diesem Schritt:**
+
+- Die Spawnrate ist an die Maze-Groesse gekoppelt.
+- Spawnpunkte sind stabil, nachvollziehbar und Save-kompatibel.
+
+### Phase 9.3 — Zellbasierte Bewegung ohne Wanddurchgang
+
+Ziel: Erst die korrekte Basisbewegung bauen, bevor Verfolgungslogik hinzukommt.
+
+**Umfang:**
+
+- Bewegung strikt zellbasiert ueber die vorhandene Maze-Topologie umsetzen.
+- Keine direkte freie Navigation im 3D-Raum fuer die erste Version.
+- Stattdessen die existierende Maze-Topologie aus `Maze`, `Cell` und ihren offenen Richtungen als alleinige Bewegungsquelle nutzen.
+- Jede Bewegungsentscheidung ueber `GetReachableNeighbors` oder eine aehnliche Hilfsmethode laufen lassen.
+- Dadurch sicherstellen, dass Monster nicht durch Waende gehen koennen.
+- Falls spaeter Kollisionen mit 3D-Waenden zusaetzlich sichtbar abgesichert werden sollen, ist das nur eine zweite Schutzschicht, nicht die primaere Bewegungslogik.
+
+**Noetige Hilfsfunktion in diesem Schritt:**
+
+- `GetReachableNeighbors(Vector2I cell)`
+
+**Ergebnis nach diesem Schritt:**
+
+- Monster koennen sich regelkonform durch das Maze bewegen.
+- Wanddurchgaenge sind bereits auf Logik-Ebene ausgeschlossen.
+
+### Phase 9.4 — Zufaelliges Wander-Verhalten einfuehren
+
+Ziel: Monster sollen sich auch ohne Spielerkontakt glaubhaft bewegen.
+
+**Umfang:**
+
+- `Wander` oder `Patrol` als ersten echten Laufzustand einfuehren.
+- Solange ein Monster niemanden sieht, laeuft es einfach zufaellig herum.
+- Die einfachste robuste Variante ist ein zufaellig gewaehltener gueltiger Nachbar pro Bewegungsintervall.
+- Alternativ kann ein kurzer Zufallspfad von `3` bis `6` Zellen erzeugt werden, damit die Bewegung weniger hektisch wirkt.
+- Auch im Wander-Zustand duerfen nur Nachbarn benutzt werden, die ueber eine offene Maze-Kante erreichbar sind.
+- Wenn ein Monster in einer Sackgasse steht, kehrt es ueber den einzigen offenen Rueckweg um, statt durch Waende zu clippen.
+
+**Ergebnis nach diesem Schritt:**
+
+- Nachts wirken Monster bereits lebendig, auch wenn noch keine Jagdlogik aktiv ist.
+
+### Phase 9.5 — Sichtpruefung und Reichweitenregel einfuehren
+
+Ziel: Die Verfolgung an eine klare, testbare Bedingung koppeln.
+
+**Umfang:**
+
+- Ein Monster darf den Spieler nur in den Chase-Zustand uebernehmen, wenn es den Spieler gesehen hat.
+- "Gesehen" bedeutet in diesem Plan: Der Spieler ist innerhalb einer Maze-Distanz von `13` Zellen und es gibt eine gueltige Sicht- oder Verbindungspruefung entlang offener Zellkanten.
+- Zunaechst reicht eine logische Verbindungspruefung auf Zellbasis; spaetere echte Sichtkegel koennen darauf aufbauen.
+- Wenn die Distanz groesser als `13` Zellen ist, bleibt das Monster im `Wander`-Zustand.
+
+**Noetige Hilfsfunktion in diesem Schritt:**
+
+- `CanSeePlayer(Vector2I monsterCell, Vector2I playerCell, int maxRangeCells)`
+
+**Ergebnis nach diesem Schritt:**
+
+- Die Monster-Aggro ist klar begrenzt und nicht global ueber das gesamte Maze verteilt.
+
+### Phase 9.6 — Wegfindung und Chase-Verhalten bauen
+
+Ziel: Monster sollen den Spieler nach Sichtkontakt intelligent ueber das Maze verfolgen.
+
+**Umfang:**
+
+- Fuer die Verfolgung einen Wegfinde-Algorithmus verwenden, idealerweise A* auf dem vorhandenen Zellgraphen.
+- Der Pfad wird nur ueber begehbare Nachbarzellen berechnet; geschlossene Waende blockieren die Kante komplett.
+- Sobald ein gueltiger Pfad zum Spieler existiert und die Distanzbedingung erfuellt ist, folgt das Monster diesem Pfad schrittweise.
+- Faellt der Spieler aus der Reichweite von `13` Zellen heraus oder gibt es keine gueltige Verbindung mehr, soll das Monster nach kurzer Zeit wieder in `Wander` oder `Search` zurueckfallen.
+- Bewegung entlang des Pfads sauber vom visuellen Interpolieren trennen.
+
+**Noetige Hilfsfunktionen in diesem Schritt:**
+
+- `FindPathToPlayer(Vector2I startCell, Vector2I playerCell)`
+- `AdvanceAlongPath(double delta)`
+
+**Ergebnis nach diesem Schritt:**
+
+- Monster koennen den Spieler durch das Labyrinth verfolgen, ohne dabei gegen die Maze-Regeln zu verstossen.
+
+### Phase 9.7 — Zustandsautomat aufraeumen und Stun anschliessen
+
+Ziel: Die bisher getrennt entstandenen Verhaltensbausteine in ein stabiles KI-Modell ueberfuehren.
+
+**Empfohlenes Zustandsmodell fuer Version 1:**
+
+- `Idle`: kurzer Startzustand direkt nach Spawn oder Reaktivierung.
+- `Wander`: Monster laufen zufaellig durch das Labyrinth, solange sie keinen Spieler sehen.
+- `Chase`: Monster verfolgen den Spieler aktiv, sobald die Sichtbedingungen erfuellt sind.
+- `Search`: optionaler kurzer Nachlaufzustand, falls der Spieler gerade ausser Sicht geraten ist.
+- `Stunned`: Monster sind bewegungsunfaehig und reagieren nicht, solange der Stun-Timer laeuft.
 
 **Stun-Implementierung:**
 
 - einfacher Zustandsautomat `Idle`, `Patrol`, `Chase`, `Stunned`
 - bei Stun: Bewegung gestoppt, Material oder Lichtsignal geaendert, Timer laeuft
 - nach Ablauf Rueckkehr in aktiven Zustand, aber nur falls noch Nacht ist
+- Falls der Code bei `Patrol` bleibt, sollte `Patrol` hier funktional dasselbe wie `Wander` bedeuten: zufaellige Bewegung ohne Zielverfolgung.
+
+**Ergebnis nach diesem Schritt:**
+
+- Das Monster-System ist funktional geschlossen und kann spaeter um Animation, Sound und Balancing erweitert werden.
+
+**Validierungsziele fuer diese Phase:**
+
+- In einem Test-Maze mit z. B. `100` begehbaren Zellen erscheinen im Mittel etwa `4` Monster.
+- Kein Monster spawned auf Start oder Ziel.
+- Ein Monster mit freier Verbindung und Spielerabstand `<= 13` Zellen wechselt in `Chase`.
+- Ein Monster ohne Sichtkontakt bewegt sich weiter zufaellig durch offene Nachbarzellen.
+- Kein Monster ueberschreitet jemals eine geschlossene Wandkante.
 
 ## Phase 10 — Fallen-System einfuehren
 
