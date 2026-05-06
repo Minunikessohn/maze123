@@ -167,8 +167,9 @@ public partial class MonsterManager : Node3D
         int stunnedCount = 0;
         float maxDistanceSquared = radius * radius;
 
-        foreach (MonsterController monster in _activeMonsters)
+        for (int index = _activeMonsters.Count - 1; index >= 0; index--)
         {
+            MonsterController monster = _activeMonsters[index];
             if (worldPosition.DistanceSquaredTo(monster.StunAnchorGlobalPosition) > maxDistanceSquared)
             {
                 continue;
@@ -198,8 +199,9 @@ public partial class MonsterManager : Node3D
         int stunnedCount = 0;
         float maxDistanceSquared = radius * radius;
 
-        foreach (MonsterController monster in _activeMonsters)
+        for (int index = _activeMonsters.Count - 1; index >= 0; index--)
         {
+            MonsterController monster = _activeMonsters[index];
             if (worldPosition.DistanceSquaredTo(monster.StunAnchorGlobalPosition) > maxDistanceSquared)
             {
                 continue;
@@ -259,13 +261,9 @@ public partial class MonsterManager : Node3D
 
     private void DespawnAll()
     {
-        foreach (MonsterController monster in _activeMonsters)
+        for (int index = _activeMonsters.Count - 1; index >= 0; index--)
         {
-            if (IsInstanceValid(monster))
-            {
-                monster.CellChanged -= OnMonsterCellChanged;
-                monster.QueueFree();
-            }
+            DespawnMonsterAtIndex(index);
         }
 
         _monsterIndices.Clear();
@@ -281,21 +279,29 @@ public partial class MonsterManager : Node3D
             return;
         }
 
+        DespawnMonsterAtIndex(removedIndex);
+        RebuildMonsterIndices();
+    }
+
+    private void DespawnMonsterAtIndex(int removedIndex)
+    {
+        if (removedIndex < 0 || removedIndex >= _activeMonsters.Count)
+        {
+            return;
+        }
+
+        MonsterController monster = _activeMonsters[removedIndex];
+
         monster.CellChanged -= OnMonsterCellChanged;
         _monsterIndices.Remove(monster);
         _stunOverlapMonsters.Remove(monster);
 
-        if (removedIndex >= 0 && removedIndex < _activeMonsters.Count)
-        {
-            _activeMonsters.RemoveAt(removedIndex);
-        }
+        _activeMonsters.RemoveAt(removedIndex);
 
-        if (removedIndex >= 0 && removedIndex < _activeMonsterCells.Count)
+        if (removedIndex < _activeMonsterCells.Count)
         {
             _activeMonsterCells.RemoveAt(removedIndex);
         }
-
-        RebuildMonsterIndices();
 
         if (IsInstanceValid(monster))
         {
