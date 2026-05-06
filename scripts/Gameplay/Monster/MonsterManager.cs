@@ -106,6 +106,45 @@ public partial class MonsterManager : Node3D
         }
     }
 
+    public bool TryStunMonsterAtCell(Vector2I cell, float durationSeconds = -1f)
+    {
+        foreach (MonsterController monster in _activeMonsters)
+        {
+            if (monster.CurrentCell != cell)
+            {
+                continue;
+            }
+
+            if (monster.TryStun(durationSeconds))
+            {
+                OnMonsterCellChanged(monster, monster.CurrentCell);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public int TryStunMonstersInCells(IEnumerable<Vector2I> cells, float durationSeconds = -1f)
+    {
+        HashSet<Vector2I> remainingCells = new(cells);
+        int stunnedCount = 0;
+
+        foreach (MonsterController monster in _activeMonsters)
+        {
+            if (!remainingCells.Contains(monster.CurrentCell) || !monster.TryStun(durationSeconds))
+            {
+                continue;
+            }
+
+            OnMonsterCellChanged(monster, monster.CurrentCell);
+            remainingCells.Remove(monster.CurrentCell);
+            stunnedCount++;
+        }
+
+        return stunnedCount;
+    }
+
     private void OnDayStarted() => Synchronize(false);
 
     private void OnNightStarted() => Synchronize(true);
