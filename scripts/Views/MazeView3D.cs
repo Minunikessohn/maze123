@@ -3,6 +3,7 @@
 using System.Collections.Generic;
 using Godot;
 using Maze.Effects;
+using Maze.Game;
 using Maze.Model;
 
 namespace Maze.Views;
@@ -42,6 +43,10 @@ public partial class MazeView3D : Node3D
     private float _exploreFactor;
     private float _brightnessMultiplier = 1f;
     private float _effectsIntensity = 1f;
+    private float _dayNightFactor;
+    private float _nightViewDistance = MazeGameConfig.DefaultNightViewDistance;
+    private bool _isNight;
+    private float _cameraDefaultFar;
     private float _markerAnimationTime;
     private readonly List<Vector2I> _trailCells = new();
     private readonly List<Vector2I> _monsterCells = new();
@@ -50,6 +55,15 @@ public partial class MazeView3D : Node3D
 
     private const float DaySunEnergy = 1.0f;
     private const float DayAmbientEnergy = 0.4f;
+    private const float NightSunEnergy = 0.14f;
+    private const float NightAmbientEnergy = 0.08f;
+    private const float NightFogDensity = 0.92f;
+    private const float ExploreFogDepthDensity = 0.88f;
+    private const float NightPlayerLightEnergy = 1.2f;
+    private const float DarkModeFactor = 0.45f;
+    private static readonly Color DayFogColor = new("#cfd6df");
+    private static readonly Color NightFogColor = new("#080a0e");
+    private static readonly Color ExploreFogColor = new("#050608");
     private const float ExploreLerpSpeed = 1.6f;
     private static readonly Color StartMarkerColor = new("#a3be8c");
     private static readonly Color GoalMarkerColor = new("#bf616a");
@@ -127,6 +141,8 @@ public partial class MazeView3D : Node3D
         {
             _worldEnvironment.Environment = (Environment)_worldEnvironment.Environment.Duplicate();
         }
+
+        _cameraDefaultFar = _camera.Far;
 
         _proximityEffects.SetCamera(_camera);
         _proximityEffects.SetEffectsScale(_effectsIntensity);
@@ -567,6 +583,29 @@ public partial class MazeView3D : Node3D
         ApplyExploreFactor(_exploreFactor);
     }
 
+    public void ApplyDayNightState(bool cycleEnabled, bool darkModeEnabled, float nightViewDistance, float timeOfDay, bool isNight)
+    {
+        _nightViewDistance = Mathf.Max(2f, nightViewDistance);
+        _isNight = isNight;
+
+        if (cycleEnabled)
+        {
+            float daylight = 0.5f + 0.5f * Mathf.Cos(Mathf.Tau * Mathf.PosMod(timeOfDay, 1f));
+            _dayNightFactor = 1f - daylight;
+
+            if (darkModeEnabled)
+            {
+                _dayNightFactor = Mathf.Clamp(_dayNightFactor * 1.15f + 0.08f, 0f, 1f);
+            }
+        }
+        else
+        {
+            _dayNightFactor = darkModeEnabled ? DarkModeFactor : 0f;
+        }
+
+        ApplyExploreFactor(_exploreFactor);
+    }
+
     private void ApplyExploreFactor(float factor)
     {
         Environment? environment = _worldEnvironment.Environment;
@@ -576,17 +615,39 @@ public partial class MazeView3D : Node3D
         }
 
         _exploreFactor = Mathf.Clamp(factor, 0f, 1f);
-        _sun.LightEnergy = Mathf.Lerp(DaySunEnergy, ExploreSunEnergy, _exploreFactor) * _brightnessMultiplier;
-        environment.AmbientLightEnergy = Mathf.Lerp(DayAmbientEnergy, ExploreAmbientEnergy, _exploreFactor) * _brightnessMultiplier;
-        _playerLight.LightEnergy = Mathf.Lerp(0f, ExplorePlayerLightEnergy, _exploreFactor) * _brightnessMultiplier * Mathf.Max(0.1f, _effectsIntensity);
-        _playerLight.Visible = _exploreFactor > 0.01f;
-        environment.FogEnabled = _exploreFactor > 0.01f;
-        environment.FogDensity = Mathf.Lerp(0f, ExploreFogDensity * _effectsIntensity, _exploreFactor);
+        float baseSunEnergy = Mathf.Lerp(DaySunEnergy, NightSunEnergy, _dayNightFactor);
+        float baseAmbientEnergy = Mathf.Lerp(DayAmbientEnergy, NightAmbientEnergy, _dayNightFactor);
+        float basePlayerLightEnergy = Mathf.Lerp(0f, NightPlayerLightEnergy, _dayNightFactor);
+        float fogDensity = Mathf.Max(
+            Mathf.Lerp(0f, NightFogDensity, _dayNightFactor),
+            Mathf.Lerp(0f, ExploreFogDepthDensity, _exploreFactor));
+        float effectiveNightFactor = Mathf.Max(_dayNightFactor, _exploreFactor);
+        bool fogActive = effectiveNightFactor > 0.01f;
+        float fogEndDistance = Mathf.Max(2f, Mathf.Lerp(_cameraDefaultFar, _nightViewDistance, effectiveNightFactor));
+        float fogBeginDistance = Mathf.Max(0.1f, fogEndDistance * 0.55f);
+        Color fogColor = DayFogColor.Lerp(NightFogColor, _dayNightFactor).Lerp(ExploreFogColor, _exploreFactor);
+
+        _sun.LightEnergy = Mathf.Lerp(baseSunEnergy, ExploreSunEnergy, _exploreFactor) * _brightnessMultiplier;
+        environment.AmbientLightEnergy = Mathf.Lerp(baseAmbientEnergy, ExploreAmbientEnergy, _exploreFactor) * _brightnessMultiplier;
+        _playerLight.LightEnergy = Mathf.Lerp(basePlayerLightEnergy, ExplorePlayerLightEnergy, _exploreFactor) * _brightnessMultiplier * Mathf.Max(0.1f, _effectsIntensity);
+        _playerLight.Visible = effectiveNightFactor > 0.01f;
+        environment.FogEnabled = fogActive;
+        environment.FogMode = fogActive ? Environment.FogModeEnum.Depth : Environment.FogModeEnum.Exponential;
+        environment.FogLightColor = fogColor;
+        environment.FogLightEnergy = fogActive ? 0.8f : 1f;
+        environment.FogDensity = fogDensity;
+        environment.FogSkyAffect = fogActive ? 1f : 0f;
+        environment.FogAerialPerspective = 0f;
+        environment.BackgroundColor = fogActive ? fogColor : DayFogColor;
+        environment.FogDepthBegin = fogBeginDistance;
+        environment.FogDepthEnd = fogEndDistance;
+        environment.FogDepthCurve = 2.4f;
+        _camera.Far = _cameraDefaultFar;
     }
 
     private void RefreshMonsterProximity()
     {
-        if (_playerCell is null || _monsterCells.Count == 0)
+        if (_playerCell is null || _monsterCells.Count == 0 || (!_isNight && _dayNightFactor > 0.01f))
         {
             _proximityEffects.Clear();
             return;

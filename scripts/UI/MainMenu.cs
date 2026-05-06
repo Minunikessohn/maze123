@@ -10,6 +10,9 @@ namespace Maze.UI;
 
 public partial class MainMenu : Control
 {
+    private static readonly Vector2 DesiredPanelSize = new(920f, 620f);
+    private static readonly Vector2 ViewportPadding = new(96f, 96f);
+
     private enum MenuMode
     {
         NewMaze,
@@ -20,6 +23,7 @@ public partial class MainMenu : Control
     private Button _newMazeButton = null!;
     private Button _loadMazeButton = null!;
     private Button _deleteMazeButton = null!;
+    private PanelContainer _panel = null!;
     private Label _modeTitleLabel = null!;
     private Label _modeDescriptionLabel = null!;
     private NewMazePanel _newMazePanel = null!;
@@ -34,6 +38,7 @@ public partial class MainMenu : Control
 
     public override void _Ready()
     {
+        _panel = GetNode<PanelContainer>("Center/Panel");
         _newMazeButton = GetNode<Button>("Center/Panel/Margin/VBox/ModeButtons/NewMazeButton");
         _loadMazeButton = GetNode<Button>("Center/Panel/Margin/VBox/ModeButtons/LoadMazeButton");
         _deleteMazeButton = GetNode<Button>("Center/Panel/Margin/VBox/ModeButtons/DeleteMazeButton");
@@ -50,8 +55,18 @@ public partial class MainMenu : Control
         _actionButton.Pressed += OnActionPressed;
         _loadMazePanel.SelectionChanged += UpdateActionButtonState;
         _deleteMazePanel.SelectionChanged += UpdateActionButtonState;
+        GetViewport().SizeChanged += UpdateResponsiveLayout;
 
+        UpdateResponsiveLayout();
         SetMode(MenuMode.NewMaze);
+    }
+
+    public override void _ExitTree()
+    {
+        if (IsNodeReady())
+        {
+            GetViewport().SizeChanged -= UpdateResponsiveLayout;
+        }
     }
 
     public void SetGeneratorOptions(IEnumerable<KeyValuePair<string, string>> generators) =>
@@ -129,5 +144,13 @@ public partial class MainMenu : Control
                 }
                 break;
         }
+    }
+
+    private void UpdateResponsiveLayout()
+    {
+        Vector2 availableSize = GetViewportRect().Size - ViewportPadding;
+        _panel.CustomMinimumSize = new Vector2(
+            Mathf.Min(DesiredPanelSize.X, Mathf.Max(0f, availableSize.X)),
+            Mathf.Min(DesiredPanelSize.Y, Mathf.Max(0f, availableSize.Y)));
     }
 }

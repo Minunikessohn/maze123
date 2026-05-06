@@ -8,6 +8,9 @@ namespace Maze.UI;
 
 public partial class PauseMenu : Control
 {
+    private static readonly Vector2 DesiredPanelSize = new(760f, 520f);
+    private static readonly Vector2 ViewportPadding = new(96f, 96f);
+
     private enum MenuMode
     {
         Visual,
@@ -16,6 +19,7 @@ public partial class PauseMenu : Control
 
     private Button _visualButton = null!;
     private Button _audioButton = null!;
+    private PanelContainer _panel = null!;
     private Label _modeTitleLabel = null!;
     private Label _modeDescriptionLabel = null!;
     private VisualSettingsPanel _visualSettingsPanel = null!;
@@ -28,6 +32,7 @@ public partial class PauseMenu : Control
 
     public override void _Ready()
     {
+        _panel = GetNode<PanelContainer>("Center/Panel");
         _visualButton = GetNode<Button>("Center/Panel/Margin/VBox/ModeButtons/VisualButton");
         _audioButton = GetNode<Button>("Center/Panel/Margin/VBox/ModeButtons/AudioButton");
         _modeTitleLabel = GetNode<Label>("Center/Panel/Margin/VBox/ModeTitle");
@@ -41,8 +46,18 @@ public partial class PauseMenu : Control
         _visualSettingsPanel.SettingsChanged += settings => VisualSettingsChanged?.Invoke(settings);
         _audioSettingsPanel.SettingsChanged += settings => AudioSettingsChanged?.Invoke(settings);
         _returnToMainMenuButton.Pressed += () => ReturnToMainMenuRequested?.Invoke();
+        GetViewport().SizeChanged += UpdateResponsiveLayout;
 
+        UpdateResponsiveLayout();
         SetMode(MenuMode.Visual);
+    }
+
+    public override void _ExitTree()
+    {
+        if (IsNodeReady())
+        {
+            GetViewport().SizeChanged -= UpdateResponsiveLayout;
+        }
     }
 
     public void SetVisualSettings(VisualSettings settings) =>
@@ -67,5 +82,13 @@ public partial class PauseMenu : Control
 
         _modeTitleLabel.Text = "Ton";
         _modeDescriptionLabel.Text = "Steuere Lautstaerken fuer Monster, Laufgeraeusche, Zielsignal und die Gesamtlautstaerke.";
+    }
+
+    private void UpdateResponsiveLayout()
+    {
+        Vector2 availableSize = GetViewportRect().Size - ViewportPadding;
+        _panel.CustomMinimumSize = new Vector2(
+            Mathf.Min(DesiredPanelSize.X, Mathf.Max(0f, availableSize.X)),
+            Mathf.Min(DesiredPanelSize.Y, Mathf.Max(0f, availableSize.Y)));
     }
 }

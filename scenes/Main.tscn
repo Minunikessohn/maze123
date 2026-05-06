@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3 uid="uid://b0maze0main"]
+[gd_scene load_steps=9 format=3 uid="uid://b0maze0main"]
 
 [ext_resource type="Script" path="res://scripts/Main.cs" id="1_main"]
 [ext_resource type="PackedScene" uid="uid://b0maze0hud" path="res://scenes/Hud.tscn" id="2_hud"]
@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://scenes/MazeView3D.tscn" id="5_view3d"]
 [ext_resource type="PackedScene" path="res://scenes/MainMenu.tscn" id="6_mainmenu"]
 [ext_resource type="PackedScene" path="res://scenes/PauseMenu.tscn" id="7_pausemenu"]
+[ext_resource type="Script" path="res://scripts/World/DayNightController.cs" id="8_daynight"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1_main")
@@ -22,5 +23,8 @@ visible = false
 
 [node name="Runner" type="Node" parent="."]
 script = ExtResource("4_runner")
+
+[node name="DayNightController" type="Node" parent="."]
+script = ExtResource("8_daynight")
 
 [node name="Hud" parent="." instance=ExtResource("2_hud")]
