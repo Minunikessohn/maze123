@@ -497,6 +497,7 @@ public partial class Main : Node
         _player.Hide();
         _view3D.ClearTrail();
         _view3D.ClearProximityEffects();
+        ClearTrapRuntimeState(clearDefinitions: true);
         _monsterManager.UpdatePlayerCell(null);
         ResetExploreMode();
         _camera3D.DisableFollow();
@@ -533,6 +534,7 @@ public partial class Main : Node
 
         _currentMaze.ResetSolverState();
         _sessionState.GoalReached = false;
+        RebuildTrapRuntimeState();
         TransitionToState(GameFlowState.Playing);
         _view2D.ForceRefresh();
         _view3D.Refresh();
@@ -1086,6 +1088,23 @@ public partial class Main : Node
     {
         _trapManager.Configure(_currentGameConfig, _currentMaze, _sessionState.TrapDefinitions, _view3D.CellSize);
         SyncTrapState();
+    }
+
+    private void ClearTrapRuntimeState(bool clearDefinitions)
+    {
+        _trapManager.Clear();
+        _sessionState.ActiveTrapCells.Clear();
+
+        if (clearDefinitions)
+        {
+            _sessionState.TrapDefinitions.Clear();
+        }
+    }
+
+    private void RebuildTrapRuntimeState()
+    {
+        ClearTrapRuntimeState(clearDefinitions: false);
+        ConfigureTrapSystem();
     }
 
     private void SyncTrapState()
