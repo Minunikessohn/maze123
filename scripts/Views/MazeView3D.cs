@@ -31,6 +31,7 @@ public partial class MazeView3D : Node3D
     private Node3D _markerContainer = null!;
     private MeshInstance3D _floor = null!;
     private MultiMeshInstance3D _floorDetails = null!;
+    private MultiMeshInstance3D _floorAccents = null!;
     private MultiMeshInstance3D _wallsHorizontal = null!;
     private MultiMeshInstance3D _wallsVertical = null!;
     private MultiMeshInstance3D _trail = null!;
@@ -127,6 +128,13 @@ public partial class MazeView3D : Node3D
         Roughness = 0.85f
     };
 
+    private static readonly StandardMaterial3D FloorAccentMaterial = new()
+    {
+        AlbedoColor = new Color("#111316"),
+        Metallic = 0.02f,
+        Roughness = 0.92f
+    };
+
     private static readonly StandardMaterial3D TrailMaterial = new()
     {
         AlbedoColor = new Color("#4ecdc4"),
@@ -151,10 +159,12 @@ public partial class MazeView3D : Node3D
         _floorDetails = GetNode<MultiMeshInstance3D>("FloorDetails");
         _wallsHorizontal = GetNode<MultiMeshInstance3D>("WallContainer/WallsHorizontal");
         _wallsVertical = GetNode<MultiMeshInstance3D>("WallContainer/WallsVertical");
+        InitializeAtmosphereDetails();
         InitializeTrail();
         InitializeMarkers();
 
         _floorDetails.MaterialOverride = FloorDetailMaterial;
+        _floorAccents.MaterialOverride = FloorAccentMaterial;
         _wallsHorizontal.MaterialOverride = WallMaterial;
         _wallsVertical.MaterialOverride = WallMaterial;
 
@@ -267,6 +277,7 @@ public partial class MazeView3D : Node3D
 
         BuildFloor(_maze);
         BuildFloorDetails(_maze);
+        BuildFloorAccents(_maze);
         BuildWalls(_maze);
         UpdateMarkers(_maze);
         RebuildTrail();
@@ -276,6 +287,8 @@ public partial class MazeView3D : Node3D
     {
         _floorDetails.Multimesh.InstanceCount = 0;
         _floorDetails.Multimesh.VisibleInstanceCount = 0;
+        _floorAccents.Multimesh.InstanceCount = 0;
+        _floorAccents.Multimesh.VisibleInstanceCount = 0;
         _wallsHorizontal.Multimesh.InstanceCount = 0;
         _wallsHorizontal.Multimesh.VisibleInstanceCount = 0;
         _wallsVertical.Multimesh.InstanceCount = 0;
@@ -311,6 +324,47 @@ public partial class MazeView3D : Node3D
                 Basis basis = Basis.Identity.Scaled(new Vector3(scale, 1f, scale));
                 floorDetails.SetInstanceTransform(instanceIndex++, new Transform3D(basis, center));
             }
+        }
+    }
+
+    private void BuildFloorAccents(global::Maze.Model.Maze maze)
+    {
+        MultiMesh floorAccents = _floorAccents.Multimesh;
+        floorAccents.Mesh = new BoxMesh
+        {
+            Size = new Vector3(CellSize * 0.54f, Mathf.Max(0.03f, CellSize * 0.024f), CellSize * 0.54f)
+        };
+
+        List<Transform3D> accentTransforms = new();
+        for (int y = 0; y < maze.Height; y++)
+        {
+            for (int x = 0; x < maze.Width; x++)
+            {
+                Cell cell = maze.GetCell(x, y);
+                int openNeighborCount = CountOpenNeighbors(cell);
+                float noise = CellNoise(x + 17, y + 41);
+                bool emphasizeCrossing = openNeighborCount >= 3;
+                bool addPlate = openNeighborCount >= 2 && noise > 0.72f;
+
+                if (!emphasizeCrossing && !addPlate)
+                {
+                    continue;
+                }
+
+                Vector3 center = global::Maze.MazeWorldGrid.CellToWorldCenter(new Vector2I(x, y), CellSize, 0.018f);
+                float scale = emphasizeCrossing
+                    ? Mathf.Lerp(0.92f, 1.08f, noise)
+                    : Mathf.Lerp(0.7f, 0.9f, noise);
+                Basis basis = Basis.Identity.Scaled(new Vector3(scale, 1f, scale));
+                accentTransforms.Add(new Transform3D(basis, center));
+            }
+        }
+
+        floorAccents.InstanceCount = accentTransforms.Count;
+        floorAccents.VisibleInstanceCount = accentTransforms.Count;
+        for (int index = 0; index < accentTransforms.Count; index++)
+        {
+            floorAccents.SetInstanceTransform(index, accentTransforms[index]);
         }
     }
 
@@ -366,6 +420,20 @@ public partial class MazeView3D : Node3D
     {
         _wallsHorizontal.Multimesh.Mesh = new BoxMesh { Size = new Vector3(CellSize, WallHeight, WallThickness) };
         _wallsVertical.Multimesh.Mesh = new BoxMesh { Size = new Vector3(WallThickness, WallHeight, CellSize) };
+    }
+
+    private void InitializeAtmosphereDetails()
+    {
+        _floorAccents = new MultiMeshInstance3D
+        {
+            Name = "FloorAccents",
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
+        };
+        _floorAccents.Multimesh = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D
+        };
+        AddChild(_floorAccents);
     }
 
     private void InitializeTrail()
@@ -616,6 +684,32 @@ public partial class MazeView3D : Node3D
             value &= 0x7fffffff;
             return value / (float)int.MaxValue;
         }
+    }
+
+    private static int CountOpenNeighbors(Cell cell)
+    {
+        int openCount = 0;
+        if (!cell.HasWall(Direction.North))
+        {
+            openCount++;
+        }
+
+        if (!cell.HasWall(Direction.East))
+        {
+            openCount++;
+        }
+
+        if (!cell.HasWall(Direction.South))
+        {
+            openCount++;
+        }
+
+        if (!cell.HasWall(Direction.West))
+        {
+            openCount++;
+        }
+
+        return openCount;
     }
 
     private Transform3D HorizontalWallTransform(float centerX, float centerZ) =>

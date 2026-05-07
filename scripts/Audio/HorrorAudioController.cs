@@ -16,6 +16,8 @@ public partial class HorrorAudioController : Node
 	private const float LowStaminaThreshold = 0.35f;
 	private const float FootstepWalkIntervalSeconds = 0.48f;
 	private const float FootstepSprintIntervalSeconds = 0.3f;
+	private const float SprintFootstepVolumeBoost = 1.45f;
+	private const float SprintMonsterCueBias = 0.12f;
 	private const float MonsterCueMinIntervalSeconds = 0.6f;
 	private const float MonsterCueMaxIntervalSeconds = 2.3f;
 	private const float HeartbeatMinIntervalSeconds = 0.52f;
@@ -181,7 +183,8 @@ public partial class HorrorAudioController : Node
 		_footstepPlayer.PitchScale = _isSprinting
 			? _random.RandfRange(1.04f, 1.14f)
 			: _random.RandfRange(0.94f, 1.06f);
-		_footstepPlayer.VolumeDb = ToDecibels(_settings.MasterVolume * _settings.FootstepVolume * 0.55f);
+		float footstepVolume = _settings.MasterVolume * _settings.FootstepVolume * (_isSprinting ? 0.55f * SprintFootstepVolumeBoost : 0.48f);
+		_footstepPlayer.VolumeDb = ToDecibels(footstepVolume);
 		_footstepPlayer.Play();
 		_footstepCooldownRemaining = _isSprinting ? FootstepSprintIntervalSeconds : FootstepWalkIntervalSeconds;
 	}
@@ -317,7 +320,8 @@ public partial class HorrorAudioController : Node
 		float dangerBoost = nearestDistance <= MonsterDangerDistanceCells
 			? 0.25f * (1f - nearestDistance / MonsterDangerDistanceCells)
 			: 0f;
-		return Mathf.Clamp(distanceFactor + dangerBoost, 0f, 1f);
+		float sprintBias = _isSprinting ? SprintMonsterCueBias : 0f;
+		return Mathf.Clamp(distanceFactor + dangerBoost + sprintBias, 0f, 1f);
 	}
 
 	private AudioStream PickRandom(IReadOnlyList<AudioStream> streams)
