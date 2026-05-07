@@ -182,6 +182,43 @@ public partial class MonsterManager : Node3D
         return true;
     }
 
+    public bool TryCatchPlayerInRadius(Vector3 worldPosition, float radius)
+    {
+        if (radius <= 0f)
+        {
+            return false;
+        }
+
+        MonsterController? closestMonster = null;
+        float maxDistanceSquared = radius * radius;
+        float closestDistanceSquared = maxDistanceSquared;
+
+        foreach (MonsterController monster in _activeMonsters)
+        {
+            if (monster.CurrentState == MonsterController.MonsterState.Stunned)
+            {
+                continue;
+            }
+
+            float distanceSquared = worldPosition.DistanceSquaredTo(monster.StunAnchorGlobalPosition);
+            if (distanceSquared > closestDistanceSquared)
+            {
+                continue;
+            }
+
+            closestMonster = monster;
+            closestDistanceSquared = distanceSquared;
+        }
+
+        if (closestMonster is null)
+        {
+            return false;
+        }
+
+        PlayerCaught?.Invoke(closestMonster);
+        return true;
+    }
+
     public int TryStunMonstersInRadius(Vector3 worldPosition, float radius, float durationSeconds = -1f)
     {
         if (radius <= 0f)

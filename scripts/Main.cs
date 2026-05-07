@@ -1279,6 +1279,13 @@ public partial class Main : Node
         }
 
         float collisionRadius = _view3D.CellSize * MonsterStunCollisionRadiusFactor;
+
+        if (_isManualMode && _monsterManager.TryCatchPlayerInRadius(_player.GlobalPosition, collisionRadius))
+        {
+            _monsterManager.UpdateStunCollision(Vector3.Zero, 0f);
+            return;
+        }
+
         _monsterManager.UpdateStunCollision(_player.GlobalPosition, collisionRadius);
     }
 
