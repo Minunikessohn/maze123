@@ -37,6 +37,7 @@ public partial class Main : Node
     private Hud _hud = null!;
     private StatsPanel _stats = null!;
     private MazeView2D _view2D = null!;
+    private MazeView2D _mapOverlay = null!;
     private MazeView3D _view3D = null!;
     private CameraController2D _camera2D = null!;
     private CameraController3D _camera3D = null!;
@@ -83,6 +84,7 @@ public partial class Main : Node
     private bool _firstPersonEnabled;
     private bool _followCamEnabledBeforeManual;
     private bool _isManualMode;
+    private bool _isMapOverlayVisible;
     private double _manualStartTimeSeconds;
     private string _pendingSaveDisplayName = string.Empty;
 
@@ -93,6 +95,7 @@ public partial class Main : Node
         _hud = GetNode<Hud>("Hud");
         _stats = GetNode<StatsPanel>("Hud/StatsPanel");
         _view2D = GetNode<MazeView2D>("MazeView2D");
+        _mapOverlay = GetNode<MazeView2D>("Hud/MapOverlay");
         _view3D = GetNode<MazeView3D>("MazeView3D");
         _camera2D = _view2D.GetNode<CameraController2D>("Camera2D");
         _camera3D = _view3D.GetNode<CameraController3D>("Camera3D");
@@ -147,6 +150,8 @@ public partial class Main : Node
         ApplySimulationSpeed(DefaultStepsPerSecond);
         ApplyVisualSettings(_sessionState.VisualSettings);
         ApplyAudioSettings(_sessionState.AudioSettings);
+        _view2D.SetCameraEnabled(_view2D.Visible);
+        _mapOverlay.Visible = false;
         TransitionToState(GameFlowState.MainMenu);
 
         GD.Print("[Main] HUD, 2D-View und 3D-View verbunden.");
@@ -176,6 +181,14 @@ public partial class Main : Node
             && _flowState is GameFlowState.Playing or GameFlowState.Paused)
         {
             TogglePauseMenu();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        if (@event is InputEventKey { Pressed: true, Echo: false, Keycode: Key.M }
+            && _flowState is GameFlowState.Playing or GameFlowState.Paused)
+        {
+            ToggleMapOverlay();
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -250,6 +263,7 @@ public partial class Main : Node
         ConfigureDayNightCycle(sanitizedConfig);
         _lastMazeBuiltFor3D = null;
         _view2D.SetMaze(_currentMaze);
+        ResetMapOverlay(clearMaze: false);
         _view3D.ClearMaze();
         ConfigureTrapSystem();
         ConfigureMonsterSystem();
@@ -343,6 +357,7 @@ public partial class Main : Node
         _view2D.ForceRefresh();
         _view3D.SetMaze(_currentMaze);
         _lastMazeBuiltFor3D = _currentMaze;
+        ResetMapOverlay(clearMaze: false);
         _sessionState.IsRunning = true;
         _sessionState.GoalReached = false;
         _sessionState.StartCell = _currentMaze.GetCell(0, 0);
@@ -393,6 +408,7 @@ public partial class Main : Node
         _player.Hide();
         _view3D.ClearTrail();
         _monsterManager.UpdatePlayerCell(null);
+        SetMapOverlayVisible(false);
         ResetExploreMode();
         ClearPlayerCameraModes();
         _solverStart = ResolveStartCell(_currentMaze);
@@ -532,6 +548,7 @@ public partial class Main : Node
         _view3D.ClearProximityEffects();
         ClearTrapRuntimeState(clearDefinitions: true);
         _monsterManager.UpdatePlayerCell(null);
+        SetMapOverlayVisible(false);
         ResetExploreMode();
         ClearPlayerCameraModes();
         RefreshSaveSlots();
@@ -556,6 +573,7 @@ public partial class Main : Node
         _view3D.ClearTrail();
         _view3D.ClearProximityEffects();
         _monsterManager.UpdatePlayerCell(null);
+        SetMapOverlayVisible(false);
         ResetExploreMode();
         ClearPlayerCameraModes();
 
@@ -590,6 +608,12 @@ public partial class Main : Node
 
         _view2D.Visible = !use3D;
         _view3D.Visible = use3D;
+        _view2D.SetCameraEnabled(_view2D.Visible);
+
+        if (!use3D)
+        {
+            SetMapOverlayVisible(false);
+        }
 
         if (use3D && _currentMaze is not null && !ReferenceEquals(_lastMazeBuiltFor3D, _currentMaze))
         {
@@ -708,6 +732,8 @@ public partial class Main : Node
         _monsterManager.UpdatePlayerCell(playerCell);
         _view3D.MarkTrailCell(x, y);
         _view3D.UpdateMonsterProximity(playerCell);
+        _mapOverlay.MarkVisited(playerCell);
+        _mapOverlay.SetPlayerCell(playerCell);
     }
 
     private void OnPlayManualToggle(bool active)
@@ -754,6 +780,7 @@ public partial class Main : Node
         _view2D.ForceRefresh();
         _view3D.SetMaze(_currentMaze);
         _lastMazeBuiltFor3D = _currentMaze;
+        ResetMapOverlay(clearMaze: false);
 
         _hud.SetUse3DActive(true);
         OnViewToggled(true);
@@ -798,6 +825,8 @@ public partial class Main : Node
         _audioController.UpdatePlayerCell(null);
         _view3D.ClearProximityEffects();
         _monsterManager.UpdatePlayerCell(null);
+        _mapOverlay.SetPlayerCell(null);
+        SetMapOverlayVisible(false);
 
         ClearPlayerCameraModes();
 
@@ -842,6 +871,41 @@ public partial class Main : Node
     {
         _hud.SetExploreModeActive(false);
         _view3D.SetExploreMode(false);
+    }
+
+    private void ToggleMapOverlay()
+    {
+        if (_currentMaze is null || !_isManualMode || !_view3D.Visible || _flowState == GameFlowState.MainMenu)
+        {
+            SetMapOverlayVisible(false);
+            return;
+        }
+
+        SetMapOverlayVisible(!_isMapOverlayVisible);
+    }
+
+    private void SetMapOverlayVisible(bool visible)
+    {
+        bool canShow = visible && _currentMaze is not null && _isManualMode && _view3D.Visible;
+        _isMapOverlayVisible = canShow;
+        _mapOverlay.Visible = canShow;
+    }
+
+    private void ResetMapOverlay(bool clearMaze)
+    {
+        SetMapOverlayVisible(false);
+        if (clearMaze)
+        {
+            _mapOverlay.ClearVisited();
+            return;
+        }
+
+        if (_currentMaze is not null)
+        {
+            _mapOverlay.SetMaze(_currentMaze);
+        }
+
+        _mapOverlay.ClearVisited();
     }
 
     private void InitializePerspectiveStateForGame()
@@ -975,6 +1039,7 @@ public partial class Main : Node
 
             _view2D.SetMaze(_currentMaze);
             _view2D.ForceRefresh();
+            ResetMapOverlay(clearMaze: false);
             _view3D.ClearProximityEffects();
             _view3D.SetMaze(_currentMaze);
             _lastMazeBuiltFor3D = _currentMaze;

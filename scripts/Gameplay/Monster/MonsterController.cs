@@ -38,12 +38,13 @@ public partial class MonsterController : Node3D
     [Export] public float MoveSpeedCellsPerSecond { get; set; } = 1.35f;
     [Export] public float PlayerWalkSpeedFactor { get; set; } = 0.85f;
     [Export] public int MaxSightRangeCells { get; set; } = 13;
+    [Export] public int VisibleSightRangeCells { get; set; } = 20;
     [Export] public float IdleDurationSeconds { get; set; } = 0.35f;
     [Export] public float ChaseMemoryDurationSeconds { get; set; } = 5f;
     [Export] public float SearchDurationSeconds { get; set; } = 1.6f;
     [Export] public float DefaultStunDurationSeconds { get; set; } = 2.4f;
     [Export] public float VisualScaleFactor { get; set; } = 1.05f;
-    [Export] public float RevealDistanceCells { get; set; } = 1.35f;
+    [Export] public float RevealDistanceCells { get; set; } = 2.2f;
     [Export] public string ImportedModelScenePath { get; set; } = DefaultImportedModelScenePath;
 
     private global::Maze.Model.Maze? _maze;
@@ -533,6 +534,11 @@ public partial class MonsterController : Node3D
         if (_playerCell is not Vector2I playerCell)
         {
             return false;
+        }
+
+        if (_maze is not null && CanSeePlayer(CurrentCell, playerCell, VisibleSightRangeCells))
+        {
+            return true;
         }
 
         Vector2 cellOffset = new(CurrentCell.X - playerCell.X, CurrentCell.Y - playerCell.Y);

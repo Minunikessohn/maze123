@@ -28,3 +28,11 @@ script = ExtResource("4_runner")
 script = ExtResource("8_daynight")
 
 [node name="Hud" parent="." instance=ExtResource("2_hud")]
+
+[node name="MapOverlay" parent="Hud" instance=ExtResource("3_view2d")]
+visible = false
+FitToViewport = true
+RevealVisitedOnly = true
+ShowPlayerMarker = true
+position = Vector2(0, 0)
+z_index = 20
