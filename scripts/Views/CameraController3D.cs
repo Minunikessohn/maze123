@@ -33,6 +33,8 @@ public partial class CameraController3D : Camera3D
     private float _followOrbitYaw;
     private float _followOrbitPitch;
     private float _followOrbitRadius;
+    private float _baseFieldOfView;
+    private float _firstPersonFieldOfViewOffset;
     private Vector3 _externalShakeOffset;
     private Vector3 _appliedShakeOffset;
 
@@ -45,6 +47,7 @@ public partial class CameraController3D : Camera3D
         Vector3 euler = Basis.GetEuler();
         _pitch = euler.X;
         _yaw = euler.Y;
+        _baseFieldOfView = Fov;
     }
 
     public override void _Process(double delta)
@@ -288,6 +291,8 @@ public partial class CameraController3D : Camera3D
             SnapFirstPersonToTarget();
         }
 
+        ApplyFieldOfView();
+
         Input.MouseMode = Input.MouseModeEnum.Captured;
         _mouseLook = false;
     }
@@ -296,6 +301,7 @@ public partial class CameraController3D : Camera3D
     {
         _firstPersonTarget = null;
         FirstPersonMode = false;
+        ApplyFieldOfView();
 
         if (Input.MouseMode == Input.MouseModeEnum.Captured)
         {
@@ -307,7 +313,14 @@ public partial class CameraController3D : Camera3D
 
     public void SetFieldOfView(float fieldOfView)
     {
-        Fov = Mathf.Clamp(fieldOfView, 55f, 100f);
+        _baseFieldOfView = Mathf.Clamp(fieldOfView, 55f, 100f);
+        ApplyFieldOfView();
+    }
+
+    public void SetFirstPersonFieldOfViewOffset(float offset)
+    {
+        _firstPersonFieldOfViewOffset = Mathf.Clamp(offset, -20f, 0f);
+        ApplyFieldOfView();
     }
 
     public void SetExternalShakeOffset(Vector3 offset)
@@ -458,6 +471,12 @@ public partial class CameraController3D : Camera3D
             Mathf.Sin(_followOrbitYaw) * cosPitch,
             sinPitch,
             Mathf.Cos(_followOrbitYaw) * cosPitch) * _followOrbitRadius;
+    }
+
+    private void ApplyFieldOfView()
+    {
+        float effectiveOffset = FirstPersonMode ? _firstPersonFieldOfViewOffset : 0f;
+        Fov = Mathf.Clamp(_baseFieldOfView + effectiveOffset, 50f, 100f);
     }
 
     private void RemoveAppliedShakeOffset()

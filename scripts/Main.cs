@@ -572,6 +572,7 @@ public partial class Main : Node
         }
 
         ApplyPlayerCameraMode();
+        RefreshAudioGameplayState();
 
         ApplyEffectiveRunnerMode();
 
@@ -742,6 +743,7 @@ public partial class Main : Node
         _hud.SetFollowCamActive(true);
         _hud.SetStaminaVisible(true);
         ApplyPlayerCameraMode(true);
+        RefreshAudioGameplayState();
 
         GD.Print("[Main] Selbst spielen aktiviert.");
     }
@@ -774,6 +776,7 @@ public partial class Main : Node
         ClearPlayerCameraModes();
 
         _followCamEnabled = _followCamEnabledBeforeManual;
+        RefreshAudioGameplayState();
         ApplyEffectiveRunnerMode();
         _hud.SetFollowCamActive(_followCamEnabled);
         _hud.SetStaminaVisible(false);
@@ -1149,7 +1152,7 @@ public partial class Main : Node
         _camera3D.SetProcessUnhandledInput(gameplayInputEnabled && _view3D.Visible);
         _runner.IsPaused = _flowState is GameFlowState.Boot or GameFlowState.MainMenu or GameFlowState.Paused;
         _dayNightController.SetPaused(_flowState != GameFlowState.Playing);
-        _audioController.SetGameplayState(showGameplay && _view3D.Visible, gameplayInputEnabled && _isManualMode && _view3D.Visible);
+        RefreshAudioGameplayState();
 
         if (!gameplayInputEnabled)
         {
@@ -1159,6 +1162,13 @@ public partial class Main : Node
         ApplyPlayerCameraMode();
         ApplyEffectiveRunnerMode();
         SyncDayNightState();
+    }
+
+    private void RefreshAudioGameplayState()
+    {
+        bool showGameplay = _flowState is GameFlowState.Loading or GameFlowState.Playing or GameFlowState.Paused;
+        bool gameplayInputEnabled = _flowState == GameFlowState.Playing;
+        _audioController.SetGameplayState(showGameplay && _view3D.Visible, gameplayInputEnabled && _isManualMode && _view3D.Visible);
     }
 
     private void ConfigureDayNightCycle(MazeGameConfig config)

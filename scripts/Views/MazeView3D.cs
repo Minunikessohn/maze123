@@ -49,6 +49,8 @@ public partial class MazeView3D : Node3D
     private bool _isNight;
     private float _cameraDefaultFar;
     private float _markerAnimationTime;
+    private float _playerLightDefaultRange;
+    private double _atmosphereTime;
     private readonly List<Vector2I> _trailCells = new();
     private readonly List<Vector2I> _monsterCells = new();
     private readonly HashSet<Vector2I> _trailCellSet = new();
@@ -58,16 +60,22 @@ public partial class MazeView3D : Node3D
     private const float DayAmbientEnergy = 0.4f;
     private const float NightSunEnergy = 0.14f;
     private const float NightAmbientEnergy = 0.08f;
-    private const float NightFogDensity = 0.92f;
-    private const float ExploreFogDepthDensity = 0.88f;
-    private const float FogDistanceDensityMultiplier = 1.15f;
-    private const float FogBeginDistanceRatio = 0.38f;
+    private const float NightFogDensity = 0.98f;
+    private const float ExploreFogDepthDensity = 0.96f;
+    private const float FogDistanceDensityMultiplier = 1.3f;
+    private const float FogBeginDistanceRatio = 0.28f;
     private const float FogDepthCurve = 3.2f;
-    private const float NightPlayerLightEnergy = 1.2f;
+    private const float NightPlayerLightEnergy = 1.05f;
     private const float DarkModeFactor = 0.45f;
+    private const float StartMarkerBaseEmission = 1.7f;
+    private const float GoalMarkerBaseEmission = 1.95f;
+    private const float TrailBaseEmission = 0.65f;
+    private const float MaxFirstPersonFovPenalty = 10f;
     private static readonly Color DayFogColor = new("#cfd6df");
     private static readonly Color NightFogColor = new("#080a0e");
     private static readonly Color ExploreFogColor = new("#050608");
+    private static readonly Color PlayerLightDayColor = new("#ffe8cc");
+    private static readonly Color PlayerLightNightColor = new("#ffc18f");
     private const float ExploreLerpSpeed = 1.6f;
     private static readonly Color StartMarkerColor = new("#a3be8c");
     private static readonly Color GoalMarkerColor = new("#bf616a");
@@ -88,7 +96,7 @@ public partial class MazeView3D : Node3D
         AlbedoColor = StartMarkerColor,
         EmissionEnabled = true,
         Emission = StartMarkerColor,
-        EmissionEnergyMultiplier = 1.7f,
+        EmissionEnergyMultiplier = StartMarkerBaseEmission,
         Metallic = 0.12f,
         Roughness = 0.14f
     };
@@ -97,7 +105,7 @@ public partial class MazeView3D : Node3D
         AlbedoColor = GoalMarkerColor,
         EmissionEnabled = true,
         Emission = GoalMarkerColor,
-        EmissionEnergyMultiplier = 1.95f,
+        EmissionEnergyMultiplier = GoalMarkerBaseEmission,
         Metallic = 0.1f,
         Roughness = 0.12f
     };
@@ -124,7 +132,7 @@ public partial class MazeView3D : Node3D
         AlbedoColor = new Color("#4ecdc4"),
         EmissionEnabled = true,
         Emission = new Color("#4ecdc4"),
-        EmissionEnergyMultiplier = 0.65f,
+        EmissionEnergyMultiplier = TrailBaseEmission,
         Metallic = 0.05f,
         Roughness = 0.2f
     };
@@ -156,6 +164,7 @@ public partial class MazeView3D : Node3D
         }
 
         _cameraDefaultFar = _camera.Far;
+        _playerLightDefaultRange = _playerLight.OmniRange;
 
         _proximityEffects.SetCamera(_camera);
         _proximityEffects.SetEffectsScale(_effectsIntensity);
@@ -164,15 +173,14 @@ public partial class MazeView3D : Node3D
 
     public override void _Process(double delta)
     {
+        _atmosphereTime += delta;
         float target = _exploreTarget ? 1f : 0f;
-        if (Mathf.IsEqualApprox(_exploreFactor, target))
+        if (!Mathf.IsEqualApprox(_exploreFactor, target))
         {
-            return;
+            _exploreFactor = Mathf.MoveToward(_exploreFactor, target, ExploreLerpSpeed * (float)delta);
         }
 
-        _exploreFactor = Mathf.MoveToward(_exploreFactor, target, ExploreLerpSpeed * (float)delta);
         ApplyExploreFactor(_exploreFactor);
-
         AnimateMarkers((float)delta);
     }
 
@@ -627,11 +635,6 @@ public partial class MazeView3D : Node3D
     public void ApplyEffectsIntensity(float effectsIntensity)
     {
         _effectsIntensity = Mathf.Clamp(effectsIntensity, 0f, 1.5f);
-        StartMarkerMaterial.EmissionEnergyMultiplier = 1.7f * _effectsIntensity;
-        GoalMarkerMaterial.EmissionEnergyMultiplier = 1.95f * _effectsIntensity;
-        TrailMaterial.EmissionEnergyMultiplier = 0.65f * _effectsIntensity;
-        _startMarkerLight.LightEnergy = 0.85f * Mathf.Max(0.1f, _effectsIntensity);
-        _goalMarkerLight.LightEnergy = 1.05f * Mathf.Max(0.1f, _effectsIntensity);
         _proximityEffects.SetEffectsScale(_effectsIntensity);
         RefreshMonsterProximity();
         ApplyExploreFactor(_exploreFactor);
@@ -676,14 +679,24 @@ public partial class MazeView3D : Node3D
             Mathf.Lerp(0f, NightFogDensity, _dayNightFactor),
             Mathf.Lerp(0f, ExploreFogDepthDensity, _exploreFactor)) * FogDistanceDensityMultiplier;
         float effectiveNightFactor = Mathf.Max(_dayNightFactor, _exploreFactor);
+        float stressFactor = Mathf.Clamp(effectiveNightFactor * Mathf.Max(0.45f, _effectsIntensity), 0f, 1f);
         bool fogActive = effectiveNightFactor > 0.01f;
         float fogEndDistance = Mathf.Max(2f, Mathf.Lerp(_cameraDefaultFar, _nightViewDistance, effectiveNightFactor));
         float fogBeginDistance = Mathf.Max(0.1f, fogEndDistance * FogBeginDistanceRatio);
         Color fogColor = DayFogColor.Lerp(NightFogColor, _dayNightFactor).Lerp(ExploreFogColor, _exploreFactor);
+        float lightPulse = 1f
+            + Mathf.Sin((float)_atmosphereTime * 5.4f) * 0.07f * stressFactor
+            + Mathf.Sin((float)_atmosphereTime * 11.1f + 0.9f) * 0.03f * stressFactor;
+        float playerLightRange = Mathf.Lerp(_playerLightDefaultRange, Mathf.Max(CellSize * 1.8f, 3.8f), effectiveNightFactor);
+        float goalRevealFactor = ComputeGoalRevealFactor(effectiveNightFactor);
+        float startMarkerFactor = Mathf.Lerp(1f, 0.55f, effectiveNightFactor) * Mathf.Max(0.15f, _effectsIntensity);
+        float goalMarkerFactor = Mathf.Lerp(1f, 0.32f, effectiveNightFactor) * goalRevealFactor * Mathf.Max(0.15f, _effectsIntensity);
 
         _sun.LightEnergy = Mathf.Lerp(baseSunEnergy, ExploreSunEnergy, _exploreFactor) * _brightnessMultiplier;
         environment.AmbientLightEnergy = Mathf.Lerp(baseAmbientEnergy, ExploreAmbientEnergy, _exploreFactor) * _brightnessMultiplier;
-        _playerLight.LightEnergy = Mathf.Lerp(basePlayerLightEnergy, ExplorePlayerLightEnergy, _exploreFactor) * _brightnessMultiplier * Mathf.Max(0.1f, _effectsIntensity);
+        _playerLight.LightEnergy = Mathf.Lerp(basePlayerLightEnergy, ExplorePlayerLightEnergy, _exploreFactor) * _brightnessMultiplier * lightPulse * Mathf.Max(0.1f, _effectsIntensity);
+        _playerLight.OmniRange = playerLightRange;
+        _playerLight.LightColor = PlayerLightDayColor.Lerp(PlayerLightNightColor, effectiveNightFactor);
         _playerLight.Visible = effectiveNightFactor > 0.01f;
         environment.FogEnabled = fogActive;
         environment.FogMode = fogActive ? Environment.FogModeEnum.Depth : Environment.FogModeEnum.Exponential;
@@ -696,7 +709,27 @@ public partial class MazeView3D : Node3D
         environment.FogDepthBegin = fogBeginDistance;
         environment.FogDepthEnd = fogEndDistance;
         environment.FogDepthCurve = FogDepthCurve;
-        _camera.Far = _cameraDefaultFar;
+        _camera.Far = fogActive ? Mathf.Min(_cameraDefaultFar, fogEndDistance + Mathf.Max(CellSize * 1.5f, 3f)) : _cameraDefaultFar;
+        _camera.SetFirstPersonFieldOfViewOffset(-MaxFirstPersonFovPenalty * effectiveNightFactor);
+        StartMarkerMaterial.EmissionEnergyMultiplier = StartMarkerBaseEmission * startMarkerFactor;
+        GoalMarkerMaterial.EmissionEnergyMultiplier = GoalMarkerBaseEmission * goalMarkerFactor;
+        TrailMaterial.EmissionEnergyMultiplier = TrailBaseEmission * Mathf.Lerp(1f, 0.78f, effectiveNightFactor) * Mathf.Max(0.15f, _effectsIntensity);
+        _startMarkerLight.LightEnergy = 0.85f * startMarkerFactor;
+        _goalMarkerLight.LightEnergy = 1.05f * goalMarkerFactor;
+    }
+
+    private float ComputeGoalRevealFactor(float effectiveNightFactor)
+    {
+        float baseReveal = Mathf.Lerp(1f, 0.3f, effectiveNightFactor);
+        if (_maze is null || _playerCell is null)
+        {
+            return baseReveal;
+        }
+
+        Vector2I goalCell = new(_maze.Width - 1, _maze.Height - 1);
+        float distanceToGoal = _playerCell.Value.DistanceTo(goalCell);
+        float distanceReveal = Mathf.InverseLerp(12f, 3f, distanceToGoal);
+        return Mathf.Clamp(Mathf.Lerp(baseReveal, 1f, distanceReveal), 0.18f, 1f);
     }
 
     private void RefreshMonsterProximity()
