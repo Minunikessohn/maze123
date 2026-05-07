@@ -9,6 +9,8 @@ namespace Maze.Gameplay.Monster;
 
 public partial class MonsterController : Node3D
 {
+    private const string DefaultImportedModelScenePath = "res://assets/monsters/Slenderman Model 3.fbx";
+
     public enum MonsterState
     {
         Idle,
@@ -38,6 +40,7 @@ public partial class MonsterController : Node3D
     [Export] public float DefaultStunDurationSeconds { get; set; } = 2.4f;
     [Export] public float VisualScaleFactor { get; set; } = 1.05f;
     [Export] public float RevealDistanceCells { get; set; } = 1.35f;
+    [Export] public string ImportedModelScenePath { get; set; } = DefaultImportedModelScenePath;
 
     private global::Maze.Model.Maze? _maze;
     private Vector2I? _playerCell;
@@ -57,8 +60,11 @@ public partial class MonsterController : Node3D
     private float _searchElapsed;
     private float _stunElapsed;
     private Vector2I? _previousCell;
-    private MeshInstance3D? _bodyMesh;
-    private StandardMaterial3D? _bodyMaterial;
+    private Node3D? _bodyRoot;
+    private Node3D? _modelAnchor;
+    private readonly List<StandardMaterial3D> _bodyMaterials = new();
+    private MeshInstance3D? _fallbackBody;
+    private bool _hasImportedVisuals;
     private OmniLight3D? _glowLight;
 
     public Vector2I SpawnCell { get; private set; }
@@ -73,11 +79,21 @@ public partial class MonsterController : Node3D
 
     public override void _Ready()
     {
-        _bodyMesh = GetNodeOrNull<MeshInstance3D>("Body");
-        if (_bodyMesh?.GetActiveMaterial(0) is StandardMaterial3D bodyMaterial)
+        _bodyRoot = GetNodeOrNull<Node3D>("Body");
+        _modelAnchor = GetNodeOrNull<Node3D>("Body/ModelAnchor");
+        _fallbackBody = GetNodeOrNull<MeshInstance3D>("Body/FallbackBody");
+        _bodyMaterials.Clear();
+        _hasImportedVisuals = false;
+        if (_bodyRoot is not null)
         {
-            _bodyMaterial = (StandardMaterial3D)bodyMaterial.Duplicate();
-            _bodyMesh.SetSurfaceOverrideMaterial(0, _bodyMaterial);
+            TryAttachImportedModel();
+            _hasImportedVisuals = HasImportedVisuals(_bodyRoot);
+            CollectBodyMaterials(_bodyRoot);
+        }
+
+        if (_fallbackBody is not null)
+        {
+            _fallbackBody.Visible = !_hasImportedVisuals;
         }
 
         _glowLight = GetNodeOrNull<OmniLight3D>("Glow");
@@ -262,8 +278,14 @@ public partial class MonsterController : Node3D
 
     private void ApplyVisualScale()
     {
-        float visualScale = Mathf.Max(0.55f, _cellSize * VisualScaleFactor);
-        Scale = Vector3.One * visualScale;
+        float visualScale = _hasImportedVisuals
+            ? Mathf.Max(1.2f, _cellSize * VisualScaleFactor * 0.9f)
+            : Mathf.Max(0.7f, _cellSize * VisualScaleFactor * 0.38f);
+
+        if (_bodyRoot is not null)
+        {
+            _bodyRoot.Scale = Vector3.One * visualScale;
+        }
 
         if (_glowLight is not null)
         {
@@ -537,11 +559,11 @@ public partial class MonsterController : Node3D
                 break;
         }
 
-        if (_bodyMaterial is not null)
+        foreach (StandardMaterial3D bodyMaterial in _bodyMaterials)
         {
-            _bodyMaterial.AlbedoColor = bodyColor;
-            _bodyMaterial.Emission = emissionColor;
-            _bodyMaterial.EmissionEnergyMultiplier = emissionEnergy;
+            bodyMaterial.AlbedoColor = bodyColor;
+            bodyMaterial.Emission = emissionColor;
+            bodyMaterial.EmissionEnergyMultiplier = emissionEnergy;
         }
 
         if (_glowLight is not null)
@@ -549,6 +571,88 @@ public partial class MonsterController : Node3D
             _glowLight.LightColor = glowColor;
             _glowLight.LightEnergy = glowEnergy;
         }
+    }
+
+    private void CollectBodyMaterials(Node node)
+    {
+        if (node is MeshInstance3D meshInstance)
+        {
+            int surfaceCount = meshInstance.Mesh?.GetSurfaceCount() ?? 0;
+            for (int surfaceIndex = 0; surfaceIndex < surfaceCount; surfaceIndex++)
+            {
+                if (meshInstance.GetActiveMaterial(surfaceIndex) is not StandardMaterial3D bodyMaterial)
+                {
+                    continue;
+                }
+
+                StandardMaterial3D duplicate = (StandardMaterial3D)bodyMaterial.Duplicate();
+                meshInstance.SetSurfaceOverrideMaterial(surfaceIndex, duplicate);
+                _bodyMaterials.Add(duplicate);
+            }
+        }
+
+        foreach (Node child in node.GetChildren())
+        {
+            CollectBodyMaterials(child);
+        }
+    }
+
+    private bool HasImportedVisuals(Node node)
+    {
+        foreach (Node child in node.GetChildren())
+        {
+            if (child == _fallbackBody)
+            {
+                continue;
+            }
+
+            if (child is MeshInstance3D meshInstance && meshInstance.Mesh is not null)
+            {
+                return true;
+            }
+
+            if (HasImportedVisuals(child))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void TryAttachImportedModel()
+    {
+        if (_modelAnchor is null)
+        {
+            return;
+        }
+
+        foreach (Node child in _modelAnchor.GetChildren())
+        {
+            child.QueueFree();
+        }
+
+        if (string.IsNullOrWhiteSpace(ImportedModelScenePath))
+        {
+            return;
+        }
+
+        PackedScene? modelScene = GD.Load<PackedScene>(ImportedModelScenePath);
+        if (modelScene is null)
+        {
+            GD.PushWarning($"Monster model could not be loaded: {ImportedModelScenePath}");
+            return;
+        }
+
+        Node? instance = modelScene.InstantiateOrNull<Node>();
+        if (instance is null)
+        {
+            GD.PushWarning($"Monster model could not be instantiated: {ImportedModelScenePath}");
+            return;
+        }
+
+        instance.Name = "ImportedModel";
+        _modelAnchor.AddChild(instance);
     }
 
     private bool CanSeePlayer(Vector2I monsterCell, Vector2I playerCell, int maxRangeCells)

@@ -1,12 +1,13 @@
 [gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/Gameplay/Monster/MonsterController.cs" id="1_controller"]
+[ext_resource type="PackedScene" path="res://assets/monsters/Slenderman Model 3.fbx" id="2_model"]
 
-[sub_resource type="SphereMesh" id="SphereMesh_body"]
-radius = 0.18
-height = 0.48
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_fallback"]
+radius = 0.22
+height = 0.9
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_body"]
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_fallback"]
 albedo_color = Color(0.75, 0.22, 0.22, 1)
 emission_enabled = true
 emission = Color(0.58, 0.08, 0.08, 1)
@@ -16,9 +17,16 @@ roughness = 0.24
 [node name="Monster" type="Node3D"]
 script = ExtResource("1_controller")
 
-[node name="Body" type="MeshInstance3D" parent="."]
-mesh = SubResource("SphereMesh_body")
-surface_material_override/0 = SubResource("StandardMaterial3D_body")
+[node name="Body" type="Node3D" parent="."]
+
+[node name="ModelAnchor" type="Node3D" parent="Body"]
+
+[node name="ImportedModel" parent="Body/ModelAnchor" instance=ExtResource("2_model")]
+
+[node name="FallbackBody" type="MeshInstance3D" parent="Body"]
+position = Vector3(0, 0.45, 0)
+mesh = SubResource("CapsuleMesh_fallback")
+surface_material_override/0 = SubResource("StandardMaterial3D_fallback")
 
 [node name="Glow" type="OmniLight3D" parent="."]
 light_color = Color(0.95, 0.25, 0.2, 1)

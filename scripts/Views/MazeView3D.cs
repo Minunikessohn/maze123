@@ -14,8 +14,8 @@ namespace Maze.Views;
 /// </summary>
 public partial class MazeView3D : Node3D
 {
-    [Export] public float CellSize = 2.8f;
-    [Export] public float WallHeight = 2.5f;
+    [Export] public float CellSize = 3.6f;
+    [Export] public float WallHeight = 3.4f;
     [Export] public float WallThickness = 0.18f;
     [Export] public float ExploreSunEnergy = 0.05f;
     [Export] public float ExploreAmbientEnergy = 0.05f;
