@@ -14,8 +14,15 @@ public partial class PlayerCharacter3D : Node3D
 {
     [Signal] public delegate void GoalReachedEventHandler();
     [Signal] public delegate void CellVisitedEventHandler(int x, int y);
+    [Signal] public delegate void StaminaChangedEventHandler(float current, float maximum, bool sprinting);
 
-    [Export] public float MoveSpeed = 4f;
+    [Export] public float PathMoveSpeed = 4f;
+    [Export] public float ManualMoveSpeed = 2.2f;
+    [Export] public float SprintMultiplier = 1.75f;
+    [Export] public float MaxStamina = 5f;
+    [Export] public float StaminaDrainPerSecond = 1.1f;
+    [Export] public float StaminaRecoveryPerSecond = 0.8f;
+    [Export] public float StaminaRecoveryDelaySeconds = 0.85f;
     [Export] public float StandHeight = 0f;
 
     public enum Mode
@@ -39,6 +46,10 @@ public partial class PlayerCharacter3D : Node3D
     private float _animElapsed;
     private float _animDuration;
     private LegoFigure? _figure;
+    private bool _firstPersonActive;
+    private float _currentStamina;
+    private float _staminaRecoveryDelayRemaining;
+    private bool _isSprinting;
 
     public bool IsMoving => _isMoving;
     public Mode CurrentMode { get; private set; } = Mode.Idle;
@@ -46,6 +57,7 @@ public partial class PlayerCharacter3D : Node3D
     public override void _Ready()
     {
         _figure = GetNodeOrNull<LegoFigure>("Figure");
+        ResetStamina(emitSignal: false);
     }
 
     public new void Hide()
@@ -58,6 +70,9 @@ public partial class PlayerCharacter3D : Node3D
         _manualCell = null;
         _manualGoal = null;
         _isAnimatingCell = false;
+        _isSprinting = false;
+        _isMoving = false;
+        ResetStamina();
         CurrentMode = Mode.Idle;
         Visible = false;
     }
@@ -104,6 +119,8 @@ public partial class PlayerCharacter3D : Node3D
         _waypoints.Clear();
         _currentIndex = 0;
         _isMoving = false;
+        _isSprinting = false;
+        ResetStamina();
 
         Position = CellToWorld(start);
         Visible = true;
@@ -122,8 +139,30 @@ public partial class PlayerCharacter3D : Node3D
         _waypoints.Clear();
         _currentIndex = 0;
         _isMoving = false;
+        _isSprinting = false;
+        ResetStamina();
         Visible = false;
         CurrentMode = Mode.Idle;
+    }
+
+    public void SetFirstPersonActive(bool active)
+    {
+        _firstPersonActive = active;
+
+        if (_figure is not null)
+        {
+            _figure.Visible = !active;
+        }
+    }
+
+    public Vector3 GetEyeWorldPosition()
+    {
+        if (_figure?.HeadPivot is not null)
+        {
+            return _figure.HeadPivot.GlobalPosition;
+        }
+
+        return GlobalPosition + new Vector3(0f, 0.45f, 0f);
     }
 
     public override void _Process(double delta)
@@ -153,7 +192,7 @@ public partial class PlayerCharacter3D : Node3D
         Vector3 toTarget = target - Position;
         FaceMovementDirection(toTarget);
         float remaining = toTarget.Length();
-        float step = MoveSpeed * _cellSize * (float)delta;
+        float step = PathMoveSpeed * _cellSize * (float)delta;
 
         if (step >= remaining)
         {
@@ -179,11 +218,15 @@ public partial class PlayerCharacter3D : Node3D
         if (_manualMaze is null || _manualCell is null || _manualGoal is null || _manualCamera is null)
         {
             _figure?.SetWalking(false);
+            _isMoving = false;
+            _isSprinting = false;
             CurrentMode = Mode.Idle;
             return;
         }
 
+        UpdateStamina(delta);
         _figure?.SetWalking(_isAnimatingCell);
+        _isMoving = _isAnimatingCell;
 
         if (_isAnimatingCell)
         {
@@ -194,6 +237,7 @@ public partial class PlayerCharacter3D : Node3D
             if (t >= 1f)
             {
                 _isAnimatingCell = false;
+                _isMoving = false;
                 _figure?.SetWalking(false);
                 Position = _animTo;
                 EmitSignal(SignalName.CellVisited, _manualCell.X, _manualCell.Y);
@@ -227,11 +271,66 @@ public partial class PlayerCharacter3D : Node3D
         _animFrom = Position;
         _animTo = CellToWorld(next);
         _animElapsed = 0f;
-        _animDuration = 1f / Mathf.Max(0.5f, MoveSpeed);
+        _isSprinting = CanSprintNow();
+        _animDuration = 1f / Mathf.Max(0.5f, GetCurrentManualSpeed());
         _isAnimatingCell = true;
+        _isMoving = true;
         _manualCell = next;
         FaceMovementDirection(_animTo - _animFrom);
     }
+
+    private float GetCurrentManualSpeed() =>
+        ManualMoveSpeed * (_isSprinting ? SprintMultiplier : 1f);
+
+    private bool CanSprintNow() =>
+        Input.IsPhysicalKeyPressed(Key.Shift) && _currentStamina > 0.05f;
+
+    private void UpdateStamina(double delta)
+    {
+        float previousStamina = _currentStamina;
+        bool previousSprintState = _isSprinting;
+        float deltaSeconds = (float)delta;
+
+        if (_isAnimatingCell && _isSprinting)
+        {
+            _currentStamina = Mathf.Max(0f, _currentStamina - StaminaDrainPerSecond * deltaSeconds);
+            _staminaRecoveryDelayRemaining = StaminaRecoveryDelaySeconds;
+
+            if (_currentStamina <= 0.001f)
+            {
+                _currentStamina = 0f;
+                _isSprinting = false;
+            }
+        }
+        else if (_staminaRecoveryDelayRemaining > 0f)
+        {
+            _staminaRecoveryDelayRemaining = Mathf.Max(0f, _staminaRecoveryDelayRemaining - deltaSeconds);
+        }
+        else if (_currentStamina < MaxStamina)
+        {
+            _currentStamina = Mathf.Min(MaxStamina, _currentStamina + StaminaRecoveryPerSecond * deltaSeconds);
+        }
+
+        if (!Mathf.IsEqualApprox(previousStamina, _currentStamina) || previousSprintState != _isSprinting)
+        {
+            EmitStaminaChanged();
+        }
+    }
+
+    private void ResetStamina(bool emitSignal = true)
+    {
+        _currentStamina = MaxStamina;
+        _staminaRecoveryDelayRemaining = 0f;
+        _isSprinting = false;
+
+        if (emitSignal)
+        {
+            EmitStaminaChanged();
+        }
+    }
+
+    private void EmitStaminaChanged() =>
+        EmitSignal(SignalName.StaminaChanged, _currentStamina, MaxStamina, _isSprinting);
 
     private Vector3 CellToWorld(Cell cell) =>
         new(cell.X * _cellSize + _cellSize / 2f, StandHeight, cell.Y * _cellSize + _cellSize / 2f);

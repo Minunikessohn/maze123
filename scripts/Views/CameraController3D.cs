@@ -22,11 +22,14 @@ public partial class CameraController3D : Camera3D
     [Export] public float FollowDistance = 4.5f;
     [Export] public float FollowHeight = 3.0f;
     [Export] public float FollowSmoothing = 6.0f;
+    [Export] public float FirstPersonForwardOffset = 0.02f;
+    [Export] public float FirstPersonSmoothing = 12.0f;
 
     private float _yaw;
     private float _pitch;
     private bool _mouseLook;
     private Node3D? _followTarget;
+    private PlayerCharacter3D? _firstPersonTarget;
     private float _followOrbitYaw;
     private float _followOrbitPitch;
     private float _followOrbitRadius;
@@ -34,6 +37,7 @@ public partial class CameraController3D : Camera3D
     private Vector3 _appliedShakeOffset;
 
     public bool FollowMode { get; private set; }
+    public bool FirstPersonMode { get; private set; }
 
     public override void _Ready()
     {
@@ -55,6 +59,14 @@ public partial class CameraController3D : Camera3D
         if (FollowMode && _followTarget is not null)
         {
             UpdateFollowCamera(delta);
+            ApplyExternalShakeOffset();
+            return;
+        }
+
+        if (FirstPersonMode && _firstPersonTarget is not null)
+        {
+            HandleKeyboardLook(delta);
+            UpdateFirstPersonCamera(delta);
             ApplyExternalShakeOffset();
             return;
         }
@@ -143,6 +155,12 @@ public partial class CameraController3D : Camera3D
             return;
         }
 
+        if (FirstPersonMode)
+        {
+            HandleFirstPersonInput(@event);
+            return;
+        }
+
         if (FollowMode)
         {
             HandleFollowInput(@event);
@@ -206,6 +224,7 @@ public partial class CameraController3D : Camera3D
 
     public void EnableFollow(Node3D target, bool snapImmediately = false)
     {
+        DisableFirstPerson();
         _followTarget = target;
         FollowMode = true;
 
@@ -248,6 +267,40 @@ public partial class CameraController3D : Camera3D
         }
     }
 
+    public void EnableFirstPerson(PlayerCharacter3D target, bool snapImmediately = false)
+    {
+        DisableFollow();
+        _firstPersonTarget = target;
+        FirstPersonMode = true;
+
+        if (target.CurrentMode != PlayerCharacter3D.Mode.Manual)
+        {
+            _yaw = target.GlobalRotation.Y;
+            _pitch = 0f;
+        }
+
+        if (snapImmediately)
+        {
+            SnapFirstPersonToTarget();
+        }
+
+        Input.MouseMode = Input.MouseModeEnum.Captured;
+        _mouseLook = false;
+    }
+
+    public void DisableFirstPerson()
+    {
+        _firstPersonTarget = null;
+        FirstPersonMode = false;
+
+        if (Input.MouseMode == Input.MouseModeEnum.Captured)
+        {
+            Input.MouseMode = Input.MouseModeEnum.Visible;
+        }
+
+        _mouseLook = false;
+    }
+
     public void SetFieldOfView(float fieldOfView)
     {
         Fov = Mathf.Clamp(fieldOfView, 55f, 100f);
@@ -281,6 +334,28 @@ public partial class CameraController3D : Camera3D
         Vector3 euler = Basis.GetEuler();
         _pitch = euler.X;
         _yaw = euler.Y;
+    }
+
+    private void UpdateFirstPersonCamera(double delta)
+    {
+        if (_firstPersonTarget is null)
+        {
+            return;
+        }
+
+        if (_firstPersonTarget.CurrentMode != PlayerCharacter3D.Mode.Manual)
+        {
+            _yaw = _firstPersonTarget.GlobalRotation.Y;
+            _pitch = 0f;
+        }
+
+        Basis desiredBasis = Basis.FromEuler(new Vector3(_pitch, _yaw, 0f));
+        Vector3 forward = -desiredBasis.Z;
+        Vector3 targetPosition = _firstPersonTarget.GetEyeWorldPosition() + forward * FirstPersonForwardOffset;
+
+        float lerpFactor = 1f - Mathf.Exp(-FirstPersonSmoothing * (float)delta);
+        GlobalPosition = GlobalPosition.Lerp(targetPosition, lerpFactor);
+        Basis = desiredBasis;
     }
 
     private void HandleFollowInput(InputEvent @event)
@@ -318,6 +393,24 @@ public partial class CameraController3D : Camera3D
         }
     }
 
+    private void HandleFirstPersonInput(InputEvent @event)
+    {
+        if (@event is InputEventMouseMotion motion && Input.MouseMode == Input.MouseModeEnum.Captured)
+        {
+            _yaw -= motion.Relative.X * MouseSensitivity;
+            _pitch = Mathf.Clamp(_pitch - motion.Relative.Y * MouseSensitivity, -1.2f, 1.2f);
+            return;
+        }
+
+        if (@event is InputEventMouseButton mouseButton
+            && mouseButton.Pressed
+            && mouseButton.ButtonIndex == MouseButton.Left
+            && Input.MouseMode != Input.MouseModeEnum.Captured)
+        {
+            Input.MouseMode = Input.MouseModeEnum.Captured;
+        }
+    }
+
     private void SnapFollowToTarget()
     {
         if (_followTarget is null)
@@ -332,6 +425,25 @@ public partial class CameraController3D : Camera3D
         Vector3 euler = Basis.GetEuler();
         _pitch = euler.X;
         _yaw = euler.Y;
+    }
+
+    private void SnapFirstPersonToTarget()
+    {
+        if (_firstPersonTarget is null)
+        {
+            return;
+        }
+
+        if (_firstPersonTarget.CurrentMode != PlayerCharacter3D.Mode.Manual)
+        {
+            _yaw = _firstPersonTarget.GlobalRotation.Y;
+            _pitch = 0f;
+        }
+
+        Basis desiredBasis = Basis.FromEuler(new Vector3(_pitch, _yaw, 0f));
+        Vector3 forward = -desiredBasis.Z;
+        GlobalPosition = _firstPersonTarget.GetEyeWorldPosition() + forward * FirstPersonForwardOffset;
+        Basis = desiredBasis;
     }
 
     private Vector3 GetFollowOrbitOffset()

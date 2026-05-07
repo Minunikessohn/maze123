@@ -77,6 +77,7 @@ public partial class Main : Node
     private bool _suppressViewRefresh;
     private bool _userRequestedUnboundedMode;
     private bool _followCamEnabled;
+    private bool _firstPersonEnabled;
     private bool _followCamEnabledBeforeManual;
     private bool _isManualMode;
     private double _manualStartTimeSeconds;
@@ -124,10 +125,12 @@ public partial class Main : Node
         _hud.ViewToggleRequested += OnViewToggled;
         _hud.HeatmapToggle += OnHeatmapToggled;
         _hud.FollowCamToggle += OnFollowCamToggled;
+        _hud.FirstPersonToggle += OnFirstPersonToggled;
         _hud.ExploreModeToggle += OnExploreModeToggled;
         _hud.UnboundedModeChanged += OnUnboundedModeChanged;
         _player.GoalReached += OnBotGoalReached;
         _player.CellVisited += OnPlayerCellVisited;
+        _player.StaminaChanged += OnPlayerStaminaChanged;
 
         _runner.GenerationStepProduced += OnGenerationStepProduced;
         _runner.GenerationFinished += OnGenerationFinished;
@@ -200,6 +203,7 @@ public partial class Main : Node
         }
 
         _currentGameConfig = sanitizedConfig;
+        InitializePerspectiveStateForGame();
         _random = new Random(sanitizedConfig.Seed);
 
         _tracker.Start();
@@ -210,7 +214,7 @@ public partial class Main : Node
         _view3D.ClearProximityEffects();
         _monsterManager.UpdatePlayerCell(null);
         ResetExploreMode();
-        _camera3D.DisableFollow();
+        ClearPlayerCameraModes();
         _currentMaze = new global::Maze.Model.Maze(sanitizedConfig.Width, sanitizedConfig.Height);
         _sessionState.ResetForNewGame(sanitizedConfig, _currentMaze);
         ConfigureDayNightCycle(sanitizedConfig);
@@ -360,7 +364,7 @@ public partial class Main : Node
         _view3D.ClearTrail();
         _monsterManager.UpdatePlayerCell(null);
         ResetExploreMode();
-        _camera3D.DisableFollow();
+        ClearPlayerCameraModes();
         _solverStart = ResolveStartCell(_currentMaze);
         _solverGoal = ResolveGoalCell(_currentMaze);
         _sessionState.StartCell = _solverStart;
@@ -443,10 +447,7 @@ public partial class Main : Node
         fullPath.Add(_solverGoal);
 
         _player.StartFollowingPath(fullPath, _view3D.CellSize);
-        if (_followCamEnabled)
-        {
-            _camera3D.EnableFollow(_player);
-        }
+        ApplyPlayerCameraMode();
     }
 
     private void OnSpeedChanged(float stepsPerSecond) =>
@@ -502,7 +503,7 @@ public partial class Main : Node
         ClearTrapRuntimeState(clearDefinitions: true);
         _monsterManager.UpdatePlayerCell(null);
         ResetExploreMode();
-        _camera3D.DisableFollow();
+        ClearPlayerCameraModes();
         RefreshSaveSlots();
         TransitionToState(GameFlowState.MainMenu);
     }
@@ -526,7 +527,7 @@ public partial class Main : Node
         _view3D.ClearProximityEffects();
         _monsterManager.UpdatePlayerCell(null);
         ResetExploreMode();
-        _camera3D.DisableFollow();
+        ClearPlayerCameraModes();
 
         if (_currentMaze is null)
         {
@@ -566,6 +567,8 @@ public partial class Main : Node
             _lastMazeBuiltFor3D = _currentMaze;
         }
 
+        ApplyPlayerCameraMode();
+
         ApplyEffectiveRunnerMode();
 
         GD.Print($"[Main] 3D-Ansicht = {use3D}");
@@ -592,25 +595,39 @@ public partial class Main : Node
         _view3D.SetExploreMode(enabled);
     }
 
+    private void OnFirstPersonToggled(bool enabled)
+    {
+        if (!IsSandboxMode())
+        {
+            _hud.SetFirstPersonActive(true);
+            ApplyPlayerCameraMode(true);
+            return;
+        }
+
+        _firstPersonEnabled = enabled;
+
+        if (enabled && !_view3D.Visible)
+        {
+            _hud.SetUse3DActive(true);
+            OnViewToggled(true);
+            return;
+        }
+
+        ApplyPlayerCameraMode(true);
+    }
+
     private void OnFollowCamToggled(bool enabled)
     {
         if (_isManualMode)
         {
             _followCamEnabled = true;
             _hud.SetFollowCamActive(true);
-            _camera3D.EnableFollow(_player);
+            ApplyPlayerCameraMode();
             return;
         }
 
         _followCamEnabled = enabled;
-
-        if (enabled && _player.Visible)
-        {
-            _camera3D.EnableFollow(_player);
-            return;
-        }
-
-        _camera3D.DisableFollow();
+        ApplyPlayerCameraMode();
     }
 
     private void OnUnboundedModeChanged(bool unbounded)
@@ -718,7 +735,8 @@ public partial class Main : Node
         _followCamEnabledBeforeManual = _followCamEnabled;
         _followCamEnabled = true;
         _hud.SetFollowCamActive(true);
-        _camera3D.EnableFollow(_player, true);
+        _hud.SetStaminaVisible(true);
+        ApplyPlayerCameraMode(true);
 
         GD.Print("[Main] Selbst spielen aktiviert.");
     }
@@ -747,11 +765,12 @@ public partial class Main : Node
         _view3D.ClearProximityEffects();
         _monsterManager.UpdatePlayerCell(null);
 
-        _camera3D.DisableFollow();
+        ClearPlayerCameraModes();
 
         _followCamEnabled = _followCamEnabledBeforeManual;
         ApplyEffectiveRunnerMode();
         _hud.SetFollowCamActive(_followCamEnabled);
+        _hud.SetStaminaVisible(false);
         _hud.SetManualPlayActive(false);
         GD.Print("[Main] Selbst spielen beendet.");
     }
@@ -759,13 +778,19 @@ public partial class Main : Node
     private void ApplySimulationSpeed(float stepsPerSecond)
     {
         _runner.StepsPerSecond = stepsPerSecond;
-        _player.MoveSpeed = Mathf.Clamp(stepsPerSecond, 0.5f, MaxSimulationSpeed);
+        _player.PathMoveSpeed = Mathf.Clamp(stepsPerSecond, 0.5f, MaxSimulationSpeed);
+    }
+
+    private void OnPlayerStaminaChanged(float current, float maximum, bool sprinting)
+    {
+        _hud.SetStamina(current, maximum, sprinting);
     }
 
     private void ApplyVisualSettings(VisualSettings settings)
     {
         _view3D.ApplyBrightness(settings.Brightness);
         _view3D.ApplyEffectsIntensity(settings.EffectsIntensity);
+        _hud.SetEffectsIntensity(settings.EffectsIntensity);
         _camera3D.SetFieldOfView(settings.FieldOfView);
         _pauseMenu.SetVisualSettings(settings);
         SyncDayNightState();
@@ -781,6 +806,46 @@ public partial class Main : Node
         _hud.SetExploreModeActive(false);
         _view3D.SetExploreMode(false);
     }
+
+    private void InitializePerspectiveStateForGame()
+    {
+        _firstPersonEnabled = false;
+        _hud.SetFirstPersonActive(ShouldUseFirstPersonCamera());
+    }
+
+    private void ClearPlayerCameraModes()
+    {
+        _player.SetFirstPersonActive(false);
+        _camera3D.DisableFirstPerson();
+        _camera3D.DisableFollow();
+    }
+
+    private void ApplyPlayerCameraMode(bool snapImmediately = false)
+    {
+        bool canTrackPlayer = _flowState == GameFlowState.Playing && _view3D.Visible && _player.Visible;
+        bool firstPersonActive = canTrackPlayer && ShouldUseFirstPersonCamera();
+
+        _player.SetFirstPersonActive(firstPersonActive);
+
+        if (firstPersonActive)
+        {
+            _camera3D.EnableFirstPerson(_player, snapImmediately);
+            return;
+        }
+
+        _camera3D.DisableFirstPerson();
+
+        if (canTrackPlayer && (_isManualMode || _followCamEnabled))
+        {
+            _camera3D.EnableFollow(_player, snapImmediately);
+            return;
+        }
+
+        _camera3D.DisableFollow();
+    }
+
+    private bool ShouldUseFirstPersonCamera() =>
+        !IsSandboxMode() || _firstPersonEnabled;
 
     private bool ShouldRefreshStepViews() =>
         !_suppressViewRefresh && !ShouldSkipInvisibleStepVisualization();
@@ -853,9 +918,10 @@ public partial class Main : Node
             _player.Hide();
             _view3D.ClearTrail();
             ResetExploreMode();
-            _camera3D.DisableFollow();
+            ClearPlayerCameraModes();
 
             _currentGameConfig = saveData.Config.Clone().Sanitize();
+            InitializePerspectiveStateForGame();
             _currentMaze = _mazeSerializer.DeserializeMaze(saveData);
             _lastMazeBuiltFor3D = null;
             _random = new Random(_currentGameConfig.Seed);
@@ -1043,16 +1109,21 @@ public partial class Main : Node
 
         _mainMenu.Visible = showMainMenu;
         _pauseMenu.Visible = showPauseMenu;
-        _hud.Visible = showGameplay && sandboxMode;
+        _hud.Visible = showGameplay;
+        _hud.SetSandboxControlsVisible(sandboxMode);
         _hud.SetPauseActive(_flowState == GameFlowState.Paused);
+        _hud.SetStaminaVisible(showGameplay && _isManualMode);
 
         if (!sandboxMode)
         {
             _hud.SetUse3DActive(true);
         }
 
-        _view2D.Visible = showGameplay && sandboxMode;
-        _view3D.Visible = showGameplay && !sandboxMode;
+        _hud.SetFirstPersonActive(ShouldUseFirstPersonCamera());
+
+        bool sandboxUse3D = sandboxMode && (_view3D.Visible || ShouldUseFirstPersonCamera());
+        _view2D.Visible = showGameplay && sandboxMode && !sandboxUse3D;
+        _view3D.Visible = showGameplay && (!sandboxMode || sandboxUse3D);
 
         bool gameplayInputEnabled = _flowState == GameFlowState.Playing;
         bool view2DInputEnabled = gameplayInputEnabled && _view2D.Visible;
@@ -1076,6 +1147,7 @@ public partial class Main : Node
             Input.MouseMode = Input.MouseModeEnum.Visible;
         }
 
+        ApplyPlayerCameraMode();
         ApplyEffectiveRunnerMode();
         SyncDayNightState();
     }

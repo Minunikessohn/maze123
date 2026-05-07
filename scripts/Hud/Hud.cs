@@ -15,6 +15,7 @@ public partial class Hud : CanvasLayer
     [Signal] public delegate void ViewToggleRequestedEventHandler(bool use3D);
     [Signal] public delegate void HeatmapToggleEventHandler(bool enabled);
     [Signal] public delegate void FollowCamToggleEventHandler(bool enabled);
+    [Signal] public delegate void FirstPersonToggleEventHandler(bool enabled);
     [Signal] public delegate void ExploreModeToggleEventHandler(bool enabled);
     [Signal] public delegate void PauseToggleEventHandler(bool paused);
     [Signal] public delegate void StepRequestedEventHandler();
@@ -38,15 +39,30 @@ public partial class Hud : CanvasLayer
     private CheckBox _viewToggle = null!;
     private CheckBox _heatmapToggle = null!;
     private CheckBox _followCamToggle = null!;
+    private CheckBox _firstPersonToggle = null!;
     private CheckBox _exploreModeToggle = null!;
     private CheckBox _unboundedToggle = null!;
+    private Control _rootPanel = null!;
+    private Control _staminaOverlay = null!;
+    private ProgressBar _staminaBar = null!;
+    private ColorRect _staminaExhaustionOverlay = null!;
+    private CanvasItem _statsPanel = null!;
     private Label _widthLabel = null!;
     private Label _heightLabel = null!;
     private Label _speedLabel = null!;
     private Label _victoryLabel = null!;
+    private float _effectsIntensity = 1f;
+    private float _staminaRatio = 1f;
+    private bool _staminaDepleted;
+    private float _pulseTime;
 
     public override void _Ready()
     {
+        _rootPanel = GetNode<Control>("Root");
+        _staminaOverlay = GetNode<Control>("StaminaOverlay");
+        _staminaBar = GetNode<ProgressBar>("StaminaOverlay/Panel/Margin/VBox/StaminaBar");
+        _staminaExhaustionOverlay = GetNode<ColorRect>("StaminaExhaustionOverlay");
+        _statsPanel = GetNode<CanvasItem>("StatsPanel");
         _widthSlider = GetNode<HSlider>("Root/Margin/VBox/Sizes/WidthSlider");
         _heightSlider = GetNode<HSlider>("Root/Margin/VBox/Sizes/HeightSlider");
         _speedSlider = GetNode<HSlider>("Root/Margin/VBox/SpeedRow/SpeedSlider");
@@ -64,6 +80,7 @@ public partial class Hud : CanvasLayer
         _viewToggle = GetNode<CheckBox>("Root/Margin/VBox/Algos/View3DToggle");
         _heatmapToggle = GetNode<CheckBox>("Root/Margin/VBox/Algos/HeatmapToggle");
         _followCamToggle = GetNode<CheckBox>("Root/Margin/VBox/Algos/FollowCamToggle");
+        _firstPersonToggle = GetNode<CheckBox>("Root/Margin/VBox/Algos/FirstPersonToggle");
         _exploreModeToggle = GetNode<CheckBox>("Root/Margin/VBox/Algos/ExploreModeToggle");
         _widthLabel = GetNode<Label>("Root/Margin/VBox/Sizes/WidthLabel");
         _heightLabel = GetNode<Label>("Root/Margin/VBox/Sizes/HeightLabel");
@@ -143,10 +160,20 @@ public partial class Hud : CanvasLayer
         _viewToggle.Toggled += OnViewToggled;
         _heatmapToggle.Toggled += OnHeatmapToggled;
         _followCamToggle.Toggled += OnFollowCamToggled;
+        _firstPersonToggle.Toggled += OnFirstPersonToggled;
         _exploreModeToggle.Toggled += OnExploreModeToggled;
 
         FillGeneratorChooser();
         FillSolverChooser();
+        SetSandboxControlsVisible(true);
+        SetStaminaVisible(false);
+        ApplyStaminaVisualState();
+    }
+
+    public override void _Process(double delta)
+    {
+        _pulseTime += (float)delta;
+        ApplyStaminaVisualState();
     }
 
     private void UpdateLabels()
@@ -214,6 +241,8 @@ public partial class Hud : CanvasLayer
 
     private void OnFollowCamToggled(bool enabled) => EmitSignal(SignalName.FollowCamToggle, enabled);
 
+    private void OnFirstPersonToggled(bool enabled) => EmitSignal(SignalName.FirstPersonToggle, enabled);
+
     private void OnExploreModeToggled(bool enabled) => EmitSignal(SignalName.ExploreModeToggle, enabled);
 
     private void FillGeneratorChooser()
@@ -264,6 +293,9 @@ public partial class Hud : CanvasLayer
     public void SetFollowCamActive(bool active) =>
         _followCamToggle.SetPressedNoSignal(active);
 
+    public void SetFirstPersonActive(bool active) =>
+        _firstPersonToggle.SetPressedNoSignal(active);
+
     public void SetExploreModeActive(bool active) =>
         _exploreModeToggle.SetPressedNoSignal(active);
 
@@ -274,5 +306,56 @@ public partial class Hud : CanvasLayer
     {
         _pauseButton.SetPressedNoSignal(active);
         _pauseButton.Text = active ? "Fortsetzen" : "Pause";
+    }
+
+    public void SetSandboxControlsVisible(bool visible)
+    {
+        _rootPanel.Visible = visible;
+        _statsPanel.Visible = visible;
+    }
+
+    public void SetStaminaVisible(bool visible)
+    {
+        _staminaOverlay.Visible = visible;
+        _staminaExhaustionOverlay.Visible = visible && _effectsIntensity > 0f && _staminaDepleted;
+    }
+
+    public void SetStamina(float current, float maximum, bool sprinting)
+    {
+        float safeMaximum = Mathf.Max(0.001f, maximum);
+        _staminaBar.MaxValue = safeMaximum;
+        _staminaBar.Value = Mathf.Clamp(current, 0f, safeMaximum);
+        _staminaRatio = (float)(_staminaBar.Value / safeMaximum);
+        _staminaDepleted = _staminaRatio <= 0.001f;
+        ApplyStaminaVisualState();
+    }
+
+    public void SetEffectsIntensity(float effectsIntensity)
+    {
+        _effectsIntensity = Mathf.Clamp(effectsIntensity, 0f, 1.5f);
+        ApplyStaminaVisualState();
+    }
+
+    private void ApplyStaminaVisualState()
+    {
+        Color fillColor = _staminaDepleted
+            ? new Color("#b42318")
+            : _staminaRatio <= 0.3f
+                ? new Color("#d97706")
+                : new Color("#4ecdc4");
+
+        _staminaBar.Modulate = fillColor;
+
+        if (!_staminaOverlay.Visible || !_staminaDepleted || _effectsIntensity <= 0.001f)
+        {
+            _staminaExhaustionOverlay.Visible = false;
+            _staminaExhaustionOverlay.Color = new Color(0.45f, 0.02f, 0.02f, 0f);
+            return;
+        }
+
+        float pulse = 0.5f + 0.5f * Mathf.Sin(_pulseTime * 6f);
+        float alpha = Mathf.Lerp(0.04f, 0.16f, pulse) * Mathf.Clamp(_effectsIntensity, 0f, 1f);
+        _staminaExhaustionOverlay.Visible = true;
+        _staminaExhaustionOverlay.Color = new Color(0.45f, 0.02f, 0.02f, alpha);
     }
 }

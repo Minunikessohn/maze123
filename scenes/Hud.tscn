@@ -6,6 +6,47 @@
 [node name="Hud" type="CanvasLayer"]
 script = ExtResource("1_hud")
 
+[node name="StaminaExhaustionOverlay" type="ColorRect" parent="."]
+visible = false
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+color = Color(0.45, 0.02, 0.02, 0)
+
+[node name="StaminaOverlay" type="MarginContainer" parent="."]
+visible = false
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -180.0
+offset_top = -92.0
+offset_right = 180.0
+offset_bottom = -20.0
+mouse_filter = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 8
+
+[node name="Panel" type="PanelContainer" parent="StaminaOverlay"]
+size_flags_horizontal = 3
+
+[node name="Margin" type="MarginContainer" parent="StaminaOverlay/Panel"]
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="VBox" type="VBoxContainer" parent="StaminaOverlay/Panel/Margin"]
+
+[node name="StaminaBar" type="ProgressBar" parent="StaminaOverlay/Panel/Margin/VBox"]
+custom_minimum_size = Vector2(320, 18)
+max_value = 100.0
+value = 100.0
+show_percentage = false
+size_flags_horizontal = 3
+
 [node name="Root" type="PanelContainer" parent="."]
 anchor_right = 1.0
 offset_bottom = 220.0
@@ -99,6 +140,9 @@ text = "Distanz-Heatmap"
 
 [node name="FollowCamToggle" type="CheckBox" parent="Root/Margin/VBox/Algos"]
 text = "Verfolger-Kamera"
+
+[node name="FirstPersonToggle" type="CheckBox" parent="Root/Margin/VBox/Algos"]
+text = "Ego-Perspektive"
 
 [node name="ExploreModeToggle" type="CheckBox" parent="Root/Margin/VBox/Algos"]
 text = "Entdeckungs-Modus"
