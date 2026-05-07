@@ -25,6 +25,7 @@ public partial class Main : Node
     private const float MaxSimulationSpeed = 100001f;
     private const float MonsterStunCollisionRadiusFactor = 0.45f;
     private const double TrapSpawnRate = 0.005d;
+    private const int MinimumMonsterSpawnDistance = 5;
     private const int MinimumTrapStartDistance = 6;
     private const int MinimumTrapSpacing = 3;
     private const int MinimumTrapGoalDistance = 2;
@@ -1328,13 +1329,19 @@ public partial class Main : Node
             return;
         }
 
-        if (_sessionState.MonsterSpawnCells.Count > 0)
-        {
-            return;
-        }
-
         Cell startCell = ResolveStartCell(_currentMaze);
         Cell goalCell = ResolveGoalCell(_currentMaze);
+
+        if (_sessionState.MonsterSpawnCells.Count > 0)
+        {
+            if (AreMonsterSpawnCellsValid(_currentMaze, startCell, goalCell, _sessionState.MonsterSpawnCells))
+            {
+                return;
+            }
+
+            _sessionState.MonsterSpawnCells.Clear();
+        }
+
         foreach (Vector2I spawnCell in ComputeMonsterSpawnCells(_currentMaze, startCell, goalCell))
         {
             _sessionState.MonsterSpawnCells.Add(spawnCell);
@@ -1393,7 +1400,7 @@ public partial class Main : Node
         int totalMazeCells = maze.Width * maze.Height;
         int spawnCount = Math.Max(1, (int)Math.Round(totalMazeCells * 0.02d, MidpointRounding.AwayFromZero));
         spawnCount = Math.Min(spawnCount, candidates.Count);
-        int minimumStartDistance = Math.Max(2, (int)Math.Round((maze.Width + maze.Height) * 0.2d, MidpointRounding.AwayFromZero));
+        int minimumStartDistance = Math.Max(MinimumMonsterSpawnDistance, (int)Math.Round((maze.Width + maze.Height) * 0.2d, MidpointRounding.AwayFromZero));
         List<(Vector2I Position, int Distance)> preferredCandidates = candidates.FindAll(candidate => candidate.Distance >= minimumStartDistance);
         List<(Vector2I Position, int Distance)> source = preferredCandidates.Count >= spawnCount ? preferredCandidates : candidates;
 
@@ -1652,6 +1659,37 @@ public partial class Main : Node
         bool isStart = candidate.X == startCell.X && candidate.Y == startCell.Y;
         bool isGoal = candidate.X == goalCell.X && candidate.Y == goalCell.Y;
         return !isStart && !isGoal && HasOpenNeighbor(maze, candidate);
+    }
+
+    private static bool AreMonsterSpawnCellsValid(
+        global::Maze.Model.Maze maze,
+        Cell startCell,
+        Cell goalCell,
+        IEnumerable<Vector2I> spawnCells)
+    {
+        Dictionary<Vector2I, int> distancesFromStart = ComputeDistancesFromStart(maze, startCell);
+
+        foreach (Vector2I spawnCell in spawnCells)
+        {
+            if (!maze.IsInside(spawnCell.X, spawnCell.Y))
+            {
+                return false;
+            }
+
+            Cell candidate = maze.GetCell(spawnCell.X, spawnCell.Y);
+            if (!IsValidMonsterSpawnCell(maze, candidate, startCell, goalCell))
+            {
+                return false;
+            }
+
+            if (!distancesFromStart.TryGetValue(spawnCell, out int distanceFromStart)
+                || distanceFromStart < MinimumMonsterSpawnDistance)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool HasOpenNeighbor(global::Maze.Model.Maze maze, Cell cell)
