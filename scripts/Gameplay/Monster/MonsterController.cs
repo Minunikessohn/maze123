@@ -36,6 +36,7 @@ public partial class MonsterController : Node3D
     [Export] public float IdleDurationSeconds { get; set; } = 0.35f;
     [Export] public float SearchDurationSeconds { get; set; } = 1.6f;
     [Export] public float DefaultStunDurationSeconds { get; set; } = 2.4f;
+    [Export] public float VisualScaleFactor { get; set; } = 1.05f;
 
     private global::Maze.Model.Maze? _maze;
     private Vector2I? _playerCell;
@@ -138,6 +139,7 @@ public partial class MonsterController : Node3D
         _previousCell = null;
         CanSeePlayerNow = false;
         LastSeenPlayerCell = null;
+        ApplyVisualScale();
         _basePosition = CellToWorld(spawnCell);
         Position = _basePosition;
         SetCurrentState(MonsterState.Idle);
@@ -241,6 +243,17 @@ public partial class MonsterController : Node3D
         UpdatePlayerVisibility();
         UpdateBehaviorState(0f);
         CellChanged?.Invoke(this, CurrentCell);
+    }
+
+    private void ApplyVisualScale()
+    {
+        float visualScale = Mathf.Max(0.55f, _cellSize * VisualScaleFactor);
+        Scale = Vector3.One * visualScale;
+
+        if (_glowLight is not null)
+        {
+            _glowLight.OmniRange = Mathf.Max(1.9f, _cellSize * 1.55f);
+        }
     }
 
     private void TryStartNextMove()

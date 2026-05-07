@@ -23,6 +23,9 @@ mesh = SubResource("BoxMesh_horizontal")
 transform_format = 1
 mesh = SubResource("BoxMesh_vertical")
 
+[sub_resource type="MultiMesh" id="MultiMesh_floor_details"]
+transform_format = 1
+
 [sub_resource type="Environment" id="Environment_explore"]
 background_mode = 1
 background_color = Color(0.02, 0.02, 0.04, 1)
@@ -75,6 +78,9 @@ script = ExtResource("7_monstermanager")
 script = ExtResource("8_trapmanager")
 
 [node name="Floor" type="MeshInstance3D" parent="."]
+
+[node name="FloorDetails" type="MultiMeshInstance3D" parent="."]
+multimesh = SubResource("MultiMesh_floor_details")
 
 [node name="WallContainer" type="Node3D" parent="."]
 

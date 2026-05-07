@@ -25,7 +25,8 @@ public partial class PlayerCharacter3D : CharacterBody3D
     [Export] public float StaminaRecoveryPerSecond = 0.8f;
     [Export] public float StaminaRecoveryDelaySeconds = 0.85f;
     [Export] public float StandHeight = 0f;
-    [Export] public float CollisionRadius = 0.18f;
+    [Export] public float CollisionRadius = 0.42f;
+    [Export] public float FigureHeightFactor = 0.58f;
 
     public enum Mode
     {
@@ -55,6 +56,7 @@ public partial class PlayerCharacter3D : CharacterBody3D
     {
         _figure = GetNodeOrNull<LegoFigure>("Figure");
         ResetStamina(emitSignal: false);
+        ApplyVisualScale();
     }
 
     public new void Hide()
@@ -93,6 +95,7 @@ public partial class PlayerCharacter3D : CharacterBody3D
         }
 
         _currentPlayerCell = null;
+        ApplyVisualScale();
         Position = _waypoints[0];
         Visible = true;
         UpdateCurrentPlayerCell(forceEmit: true);
@@ -120,6 +123,7 @@ public partial class PlayerCharacter3D : CharacterBody3D
         Velocity = Vector3.Zero;
         ResetStamina();
 
+        ApplyVisualScale();
         Position = CellToWorld(start);
         Visible = true;
         CurrentMode = Mode.Manual;
@@ -325,6 +329,19 @@ public partial class PlayerCharacter3D : CharacterBody3D
 
     private void EmitStaminaChanged() =>
         EmitSignal(SignalName.StaminaChanged, _currentStamina, MaxStamina, _isSprinting);
+
+    private void ApplyVisualScale()
+    {
+        if (_figure is null)
+        {
+            return;
+        }
+
+        float targetHeight = Mathf.Max(0.6f, _cellSize * FigureHeightFactor);
+        float baseFigureHeight = 32f;
+        float figureScale = targetHeight / baseFigureHeight;
+        _figure.Scale = Vector3.One * figureScale;
+    }
 
     private Vector3 ResolveManualMotion(Vector3 desiredMotion)
     {

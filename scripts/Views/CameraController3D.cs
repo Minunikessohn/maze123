@@ -13,14 +13,14 @@ namespace Maze.Views;
 /// </summary>
 public partial class CameraController3D : Camera3D
 {
-    [Export] public float MoveSpeed = 8f;
+    [Export] public float MoveSpeed = 12f;
     [Export] public float SprintMultiplier = 2f;
     [Export] public float MouseSensitivity = 0.003f;
     [Export] public float KeyTurnSpeed = 1.5f;
-    [Export] public float ZoomStep = 1.5f;
+    [Export] public float ZoomStep = 2.4f;
     [Export] public float ZoomSprintMultiplier = 3f;
-    [Export] public float FollowDistance = 4.5f;
-    [Export] public float FollowHeight = 3.0f;
+    [Export] public float FollowDistance = 7.5f;
+    [Export] public float FollowHeight = 4.8f;
     [Export] public float FollowSmoothing = 6.0f;
     [Export] public float FirstPersonForwardOffset = 0.02f;
     [Export] public float FirstPersonSmoothing = 12.0f;
@@ -209,10 +209,11 @@ public partial class CameraController3D : Camera3D
         }
     }
 
-    public void FitToMaze(global::Maze.Model.Maze maze)
+    public void FitToMaze(global::Maze.Model.Maze maze, float cellSize = 1f)
     {
-        float width = maze.Width;
-        float height = maze.Height;
+        float scaledCellSize = Mathf.Max(0.1f, cellSize);
+        float width = maze.Width * scaledCellSize;
+        float height = maze.Height * scaledCellSize;
         float centerX = width / 2f;
         float centerZ = height / 2f;
         float fitHeight = Mathf.Max(width, height) * 0.8f;

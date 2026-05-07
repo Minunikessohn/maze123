@@ -14,13 +14,13 @@ namespace Maze.Views;
 /// </summary>
 public partial class MazeView3D : Node3D
 {
-    [Export] public float CellSize = 1.0f;
-    [Export] public float WallHeight = 1.4f;
-    [Export] public float WallThickness = 0.1f;
+    [Export] public float CellSize = 2.8f;
+    [Export] public float WallHeight = 2.5f;
+    [Export] public float WallThickness = 0.18f;
     [Export] public float ExploreSunEnergy = 0.05f;
     [Export] public float ExploreAmbientEnergy = 0.05f;
     [Export] public float ExploreFogDensity = 0.06f;
-    [Export] public float ExplorePlayerLightEnergy = 1.6f;
+    [Export] public float ExplorePlayerLightEnergy = 2.1f;
 
     private CameraController3D _camera = null!;
     private DirectionalLight3D _sun = null!;
@@ -30,6 +30,7 @@ public partial class MazeView3D : Node3D
     private Node3D _wallContainer = null!;
     private Node3D _markerContainer = null!;
     private MeshInstance3D _floor = null!;
+    private MultiMeshInstance3D _floorDetails = null!;
     private MultiMeshInstance3D _wallsHorizontal = null!;
     private MultiMeshInstance3D _wallsVertical = null!;
     private MultiMeshInstance3D _trail = null!;
@@ -111,6 +112,13 @@ public partial class MazeView3D : Node3D
         AlbedoColor = new Color("#2c2c2c")
     };
 
+    private static readonly StandardMaterial3D FloorDetailMaterial = new()
+    {
+        AlbedoColor = new Color("#1a1d21"),
+        Metallic = 0.04f,
+        Roughness = 0.85f
+    };
+
     private static readonly StandardMaterial3D TrailMaterial = new()
     {
         AlbedoColor = new Color("#4ecdc4"),
@@ -132,11 +140,13 @@ public partial class MazeView3D : Node3D
         _proximityEffects = GetNode<ProximityEffectController>("MonsterProximityOverlay");
         _wallContainer = GetNode<Node3D>("WallContainer");
         _floor = GetNode<MeshInstance3D>("Floor");
+        _floorDetails = GetNode<MultiMeshInstance3D>("FloorDetails");
         _wallsHorizontal = GetNode<MultiMeshInstance3D>("WallContainer/WallsHorizontal");
         _wallsVertical = GetNode<MultiMeshInstance3D>("WallContainer/WallsVertical");
         InitializeTrail();
         InitializeMarkers();
 
+        _floorDetails.MaterialOverride = FloorDetailMaterial;
         _wallsHorizontal.MaterialOverride = WallMaterial;
         _wallsVertical.MaterialOverride = WallMaterial;
 
@@ -170,7 +180,7 @@ public partial class MazeView3D : Node3D
     {
         _maze = maze;
         Rebuild();
-        _camera.FitToMaze(maze);
+        _camera.FitToMaze(maze, CellSize);
     }
 
     public void ClearMaze()
@@ -248,6 +258,7 @@ public partial class MazeView3D : Node3D
         }
 
         BuildFloor(_maze);
+        BuildFloorDetails(_maze);
         BuildWalls(_maze);
         UpdateMarkers(_maze);
         RebuildTrail();
@@ -255,6 +266,8 @@ public partial class MazeView3D : Node3D
 
     private void ResetMultiMeshes()
     {
+        _floorDetails.Multimesh.InstanceCount = 0;
+        _floorDetails.Multimesh.VisibleInstanceCount = 0;
         _wallsHorizontal.Multimesh.InstanceCount = 0;
         _wallsHorizontal.Multimesh.VisibleInstanceCount = 0;
         _wallsVertical.Multimesh.InstanceCount = 0;
@@ -263,10 +276,34 @@ public partial class MazeView3D : Node3D
 
     private void BuildFloor(global::Maze.Model.Maze maze)
     {
-        Vector3 size = new(maze.Width * CellSize, 0.05f, maze.Height * CellSize);
+        float floorThickness = Mathf.Max(0.05f, CellSize * 0.06f);
+        Vector3 size = new(maze.Width * CellSize, floorThickness, maze.Height * CellSize);
         _floor.Mesh = new BoxMesh { Size = size };
         _floor.MaterialOverride = FloorMaterial;
-        _floor.Position = new Vector3(maze.Width * CellSize / 2f, -0.025f, maze.Height * CellSize / 2f);
+        _floor.Position = new Vector3(maze.Width * CellSize / 2f, -floorThickness * 0.5f, maze.Height * CellSize / 2f);
+    }
+
+    private void BuildFloorDetails(global::Maze.Model.Maze maze)
+    {
+        MultiMesh floorDetails = _floorDetails.Multimesh;
+        floorDetails.Mesh = new BoxMesh
+        {
+            Size = new Vector3(CellSize * 0.72f, Mathf.Max(0.02f, CellSize * 0.018f), CellSize * 0.72f)
+        };
+        floorDetails.InstanceCount = maze.Width * maze.Height;
+        floorDetails.VisibleInstanceCount = maze.Width * maze.Height;
+
+        int instanceIndex = 0;
+        for (int y = 0; y < maze.Height; y++)
+        {
+            for (int x = 0; x < maze.Width; x++)
+            {
+                Vector3 center = new(x * CellSize + CellSize / 2f, 0.012f, y * CellSize + CellSize / 2f);
+                float scale = 0.84f + CellNoise(x, y) * 0.14f;
+                Basis basis = Basis.Identity.Scaled(new Vector3(scale, 1f, scale));
+                floorDetails.SetInstanceTransform(instanceIndex++, new Transform3D(basis, center));
+            }
+        }
     }
 
     private void BuildWalls(global::Maze.Model.Maze maze)
@@ -551,12 +588,26 @@ public partial class MazeView3D : Node3D
         _markerAnimationTime += delta;
 
         float startBob = 0.04f * Mathf.Sin(_markerAnimationTime * 1.9f);
+        startBob *= Mathf.Max(1f, CellSize * 0.35f);
         _startMarkerAccent.Position = new Vector3(0f, startBob, 0f);
         _startMarkerAccent.RotateY(delta * 0.75f);
 
         float goalBob = 0.06f * Mathf.Sin(_markerAnimationTime * 2.4f + 0.8f);
+        goalBob *= Mathf.Max(1f, CellSize * 0.35f);
         _goalMarkerAccent.Position = new Vector3(0f, goalBob, 0f);
         _goalMarkerAccent.RotateY(-delta * 1.1f);
+    }
+
+    private static float CellNoise(int x, int y)
+    {
+        unchecked
+        {
+            int hash = x * 73856093 ^ y * 19349663;
+            hash = (hash << 13) ^ hash;
+            int value = hash * (hash * hash * 15731 + 789221) + 1376312589;
+            value &= 0x7fffffff;
+            return value / (float)int.MaxValue;
+        }
     }
 
     private Transform3D HorizontalWallTransform(float centerX, float centerZ) =>
