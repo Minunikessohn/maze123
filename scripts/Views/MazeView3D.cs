@@ -639,9 +639,11 @@ public partial class MazeView3D : Node3D
             return;
         }
 
+        float trailThickness = Mathf.Max(0.028f, CellSize * 0.01f);
+        float trailHeight = Mathf.Max(0.07f, CellSize * 0.02f);
         trailMesh.Mesh = new BoxMesh
         {
-            Size = new Vector3(CellSize * 0.42f, 0.035f, CellSize * 0.42f)
+            Size = new Vector3(CellSize * 0.42f, trailThickness, CellSize * 0.42f)
         };
         trailMesh.InstanceCount = _trailCells.Count;
         trailMesh.VisibleInstanceCount = _trailCells.Count;
@@ -649,7 +651,7 @@ public partial class MazeView3D : Node3D
         for (int index = 0; index < _trailCells.Count; index++)
         {
             Vector2I cell = _trailCells[index];
-            Vector3 center = global::Maze.MazeWorldGrid.CellToWorldCenter(cell, CellSize, 0.02f);
+            Vector3 center = global::Maze.MazeWorldGrid.CellToWorldCenter(cell, CellSize, trailHeight);
             trailMesh.SetInstanceTransform(index, new Transform3D(Basis.Identity, center));
         }
     }
