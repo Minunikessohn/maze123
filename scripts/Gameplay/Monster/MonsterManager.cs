@@ -39,6 +39,7 @@ public partial class MonsterManager : Node3D
 
     public IReadOnlyList<Vector2I> ActiveMonsterCells => _activeMonsterCells;
     public event Action<MonsterController>? PlayerSpotted;
+    public event Action<MonsterController>? PlayerCaught;
 
     public override void _Ready()
     {
@@ -128,6 +129,14 @@ public partial class MonsterManager : Node3D
         foreach (MonsterController monster in _activeMonsters)
         {
             monster.SetPlayerCell(playerCell);
+        }
+    }
+
+    public void UpdatePlayerWorldPosition(Vector3? playerWorldPosition)
+    {
+        foreach (MonsterController monster in _activeMonsters)
+        {
+            monster.SetPlayerWorldPosition(playerWorldPosition);
         }
     }
 
@@ -267,6 +276,7 @@ public partial class MonsterManager : Node3D
             AddChild(monster);
             monster.CellChanged += OnMonsterCellChanged;
             monster.PlayerSpotted += OnMonsterPlayerSpotted;
+            monster.PlayerCaught += OnMonsterPlayerCaught;
             monster.Configure(_maze!, spawnCell, _cellSize, _config?.MonsterCanBeStunned ?? false);
             monster.SetPlayerWalkSpeed(_playerWalkSpeedCellsPerSecond);
             monster.SetPlayerCell(_playerCell);
@@ -314,6 +324,7 @@ public partial class MonsterManager : Node3D
 
         monster.CellChanged -= OnMonsterCellChanged;
         monster.PlayerSpotted -= OnMonsterPlayerSpotted;
+        monster.PlayerCaught -= OnMonsterPlayerCaught;
         _monsterIndices.Remove(monster);
         _stunOverlapMonsters.Remove(monster);
 
@@ -358,5 +369,10 @@ public partial class MonsterManager : Node3D
     private void OnMonsterPlayerSpotted(MonsterController monster)
     {
         PlayerSpotted?.Invoke(monster);
+    }
+
+    private void OnMonsterPlayerCaught(MonsterController monster)
+    {
+        PlayerCaught?.Invoke(monster);
     }
 }

@@ -12,6 +12,7 @@ public partial class MonsterController : Node3D
     private const string DefaultImportedModelScenePath = "res://assets/monsters/Slenderman Model 3.fbx";
     private const float PlayerSpottedScreechCooldownSeconds = 20f;
     private const float DefaultPlayerWalkSpeedCellsPerSecond = 2.2f;
+    private const float CatchDistanceFactor = 0.32f;
 
     public enum MonsterState
     {
@@ -47,6 +48,7 @@ public partial class MonsterController : Node3D
 
     private global::Maze.Model.Maze? _maze;
     private Vector2I? _playerCell;
+    private Vector3? _playerWorldPosition;
     private float _cellSize = 1f;
     private float _playerWalkSpeedCellsPerSecond = DefaultPlayerWalkSpeedCellsPerSecond;
     private float _hoverTime;
@@ -80,6 +82,7 @@ public partial class MonsterController : Node3D
     public MonsterState CurrentState { get; private set; } = MonsterState.Idle;
     public event Action<MonsterController, Vector2I>? CellChanged;
     public event Action<MonsterController>? PlayerSpotted;
+    public event Action<MonsterController>? PlayerCaught;
 
     public Vector3 StunAnchorGlobalPosition => GlobalPosition;
 
@@ -132,6 +135,13 @@ public partial class MonsterController : Node3D
             return;
         }
 
+        if (UpdateInCellChase(deltaSeconds))
+        {
+            RefreshVisibility();
+            ApplyHoverOffset();
+            return;
+        }
+
         if (_isMoving)
         {
             UpdateMovement(deltaSeconds);
@@ -172,6 +182,7 @@ public partial class MonsterController : Node3D
         _previousCell = null;
         CanSeePlayerNow = false;
         LastSeenPlayerCell = null;
+        _playerWorldPosition = null;
         ApplyVisualScale();
         _basePosition = CellToWorld(spawnCell);
         Position = _basePosition;
@@ -188,6 +199,11 @@ public partial class MonsterController : Node3D
         }
 
         UpdatePlayerVisibility();
+    }
+
+    public void SetPlayerWorldPosition(Vector3? playerWorldPosition)
+    {
+        _playerWorldPosition = playerWorldPosition;
     }
 
     public void ActivateMonster()
@@ -285,6 +301,44 @@ public partial class MonsterController : Node3D
         UpdatePlayerVisibility();
         UpdateBehaviorState(0f);
         CellChanged?.Invoke(this, CurrentCell);
+    }
+
+    private bool UpdateInCellChase(float delta)
+    {
+        if (_playerCell is not Vector2I playerCell
+            || _playerWorldPosition is not Vector3 playerWorldPosition
+            || playerCell != CurrentCell)
+        {
+            return false;
+        }
+
+        _isMoving = false;
+        Vector3 targetPosition = playerWorldPosition;
+        targetPosition.Y = StandHeight;
+        Vector3 toTarget = targetPosition - _basePosition;
+        float distanceToTarget = toTarget.Length();
+
+        if (distanceToTarget > 0.0001f)
+        {
+            float maxStep = GetEffectiveMoveSpeedCellsPerSecond() * _cellSize * delta;
+            if (maxStep >= distanceToTarget)
+            {
+                _basePosition = targetPosition;
+            }
+            else
+            {
+                _basePosition += toTarget.Normalized() * maxStep;
+            }
+
+            FaceMovementDirection(toTarget);
+        }
+
+        if ((_basePosition - targetPosition).Length() <= Mathf.Max(0.05f, _cellSize * CatchDistanceFactor))
+        {
+            PlayerCaught?.Invoke(this);
+        }
+
+        return true;
     }
 
     private void ApplyVisualScale()

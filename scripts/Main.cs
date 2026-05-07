@@ -115,6 +115,7 @@ public partial class Main : Node
         _monsterManager.BindDayNightController(_dayNightController);
         _monsterManager.BindTrapManager(_trapManager);
         _monsterManager.PlayerSpotted += OnMonsterPlayerSpotted;
+        _monsterManager.PlayerCaught += OnMonsterPlayerCaught;
         _pauseMenu.SetVisualSettings(_sessionState.VisualSettings);
         _pauseMenu.SetAudioSettings(_sessionState.AudioSettings);
         RefreshSaveSlots();
@@ -157,6 +158,8 @@ public partial class Main : Node
             return;
         }
 
+        _monsterManager.UpdatePlayerWorldPosition(_player.Visible ? _player.GlobalPosition : null);
+
         SyncDayNightState();
         SyncTrapState();
         UpdateMonsterStunCollision();
@@ -189,6 +192,21 @@ public partial class Main : Node
     private void OnMonsterPlayerSpotted(MonsterController monster)
     {
         _audioController.PlayMonsterScreech();
+    }
+
+    private void OnMonsterPlayerCaught(MonsterController monster)
+    {
+        if (!_isManualMode || _currentMaze is null || !_player.Visible)
+        {
+            return;
+        }
+
+        Cell startCell = ResolveStartCell(_currentMaze);
+        _audioController.PlayMonsterBite();
+        _player.ResetManualPosition(startCell);
+        _view3D.ClearProximityEffects();
+        _sessionState.GoalReached = false;
+        _monsterManager.UpdatePlayerWorldPosition(_player.GlobalPosition);
     }
 
     private void OnGenerateRequested(int width, int height, string generatorId)

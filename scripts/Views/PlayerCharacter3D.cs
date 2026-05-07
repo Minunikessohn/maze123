@@ -148,6 +148,23 @@ public partial class PlayerCharacter3D : CharacterBody3D
         CurrentMode = Mode.Idle;
     }
 
+    public void ResetManualPosition(Cell start)
+    {
+        if (CurrentMode != Mode.Manual)
+        {
+            return;
+        }
+
+        Position = CellToWorld(start);
+        Velocity = Vector3.Zero;
+        _isMoving = false;
+        _isSprinting = false;
+        _figure?.SetWalking(false);
+        ResetStamina();
+        _currentPlayerCell = null;
+        UpdateCurrentPlayerCell(forceEmit: true);
+    }
+
     public void SetFirstPersonActive(bool active)
     {
         _firstPersonActive = active;
