@@ -1359,7 +1359,7 @@ public partial class Main : Node
         }
 
         int totalMazeCells = maze.Width * maze.Height;
-        int spawnCount = Math.Max(1, (int)Math.Round(totalMazeCells * 0.01d, MidpointRounding.AwayFromZero));
+        int spawnCount = Math.Max(1, (int)Math.Round(totalMazeCells * 0.02d, MidpointRounding.AwayFromZero));
         spawnCount = Math.Min(spawnCount, candidates.Count);
         int minimumStartDistance = Math.Max(2, (int)Math.Round((maze.Width + maze.Height) * 0.2d, MidpointRounding.AwayFromZero));
         List<(Vector2I Position, int Distance)> preferredCandidates = candidates.FindAll(candidate => candidate.Distance >= minimumStartDistance);

@@ -36,6 +36,7 @@ public partial class MonsterController : Node3D
     [Export] public float PauseBetweenMoves { get; set; } = 0.3f;
     [Export] public int MaxSightRangeCells { get; set; } = 13;
     [Export] public float IdleDurationSeconds { get; set; } = 0.35f;
+    [Export] public float ChaseMemoryDurationSeconds { get; set; } = 5f;
     [Export] public float SearchDurationSeconds { get; set; } = 1.6f;
     [Export] public float DefaultStunDurationSeconds { get; set; } = 2.4f;
     [Export] public float VisualScaleFactor { get; set; } = 1.05f;
@@ -57,6 +58,7 @@ public partial class MonsterController : Node3D
     private bool _hasBeenRevealed;
     private bool _simulationPaused;
     private float _idleElapsed;
+    private float _chaseMemoryRemaining;
     private float _searchElapsed;
     private float _stunElapsed;
     private Vector2I? _previousCell;
@@ -159,6 +161,7 @@ public partial class MonsterController : Node3D
         _hasBeenRevealed = false;
         _simulationPaused = false;
         _idleElapsed = IdleDurationSeconds;
+        _chaseMemoryRemaining = 0f;
         _searchElapsed = 0f;
         _stunElapsed = 0f;
         _previousCell = null;
@@ -207,6 +210,7 @@ public partial class MonsterController : Node3D
         _isMoving = false;
         _pauseElapsed = 0f;
         _idleElapsed = 0f;
+        _chaseMemoryRemaining = 0f;
         _searchElapsed = 0f;
         _stunElapsed = 0f;
         SetCurrentState(MonsterState.Idle);
@@ -238,6 +242,7 @@ public partial class MonsterController : Node3D
         _moveDuration = 0f;
         _pauseElapsed = 0f;
         _idleElapsed = 0f;
+        _chaseMemoryRemaining = 0f;
         _searchElapsed = 0f;
         _stunElapsed = effectiveDuration;
         _hasBeenRevealed = true;
@@ -302,6 +307,15 @@ public partial class MonsterController : Node3D
 
         Cell currentCell = _maze.GetCell(CurrentCell.X, CurrentCell.Y);
         if (CanSeePlayerNow && _playerCell is Vector2I playerCell && AdvanceAlongPath(playerCell, MonsterState.Chase))
+        {
+            return;
+        }
+
+        if (!CanSeePlayerNow
+            && LastSeenPlayerCell is Vector2I rememberedPlayerCell
+            && _chaseMemoryRemaining > 0f
+            && rememberedPlayerCell != CurrentCell
+            && AdvanceAlongPath(rememberedPlayerCell, MonsterState.Chase))
         {
             return;
         }
@@ -385,6 +399,7 @@ public partial class MonsterController : Node3D
         if (_playerCell is not Vector2I playerCell || _maze is null)
         {
             CanSeePlayerNow = false;
+            _chaseMemoryRemaining = 0f;
             LastSeenPlayerCell = null;
             _searchElapsed = 0f;
             RefreshVisibility();
@@ -394,13 +409,12 @@ public partial class MonsterController : Node3D
         CanSeePlayerNow = CanSeePlayer(CurrentCell, playerCell, MaxSightRangeCells);
         if (!CanSeePlayerNow)
         {
-            LastSeenPlayerCell = null;
-            _searchElapsed = 0f;
             RefreshVisibility();
             return;
         }
 
         LastSeenPlayerCell = playerCell;
+        _chaseMemoryRemaining = Mathf.Max(0f, ChaseMemoryDurationSeconds);
         _searchElapsed = SearchDurationSeconds;
         _hasBeenRevealed = true;
         if (!_isMoving)
@@ -474,12 +488,16 @@ public partial class MonsterController : Node3D
             return;
         }
 
+        if (lastSeenPlayerCell != CurrentCell && _chaseMemoryRemaining > 0f)
+        {
+            _chaseMemoryRemaining = Mathf.Max(0f, _chaseMemoryRemaining - delta);
+            SetCurrentState(MonsterState.Chase);
+            return;
+        }
+
         if (lastSeenPlayerCell == CurrentCell)
         {
-            LastSeenPlayerCell = null;
-            _searchElapsed = 0f;
-            SetCurrentState(MonsterState.Wander);
-            return;
+            _chaseMemoryRemaining = 0f;
         }
 
         if (_searchElapsed > 0f)
@@ -489,6 +507,7 @@ public partial class MonsterController : Node3D
             return;
         }
 
+        _chaseMemoryRemaining = 0f;
         LastSeenPlayerCell = null;
         SetCurrentState(MonsterState.Wander);
     }
@@ -564,6 +583,7 @@ public partial class MonsterController : Node3D
             bodyMaterial.AlbedoColor = bodyColor;
             bodyMaterial.Emission = emissionColor;
             bodyMaterial.EmissionEnergyMultiplier = emissionEnergy;
+            bodyMaterial.Transparency = BaseMaterial3D.TransparencyEnum.Disabled;
         }
 
         if (_glowLight is not null)
@@ -586,6 +606,7 @@ public partial class MonsterController : Node3D
                 }
 
                 StandardMaterial3D duplicate = (StandardMaterial3D)bodyMaterial.Duplicate();
+                ForceOpaqueMaterial(duplicate);
                 meshInstance.SetSurfaceOverrideMaterial(surfaceIndex, duplicate);
                 _bodyMaterials.Add(duplicate);
             }
@@ -653,6 +674,16 @@ public partial class MonsterController : Node3D
 
         instance.Name = "ImportedModel";
         _modelAnchor.AddChild(instance);
+    }
+
+    private static void ForceOpaqueMaterial(StandardMaterial3D material)
+    {
+        Color albedoColor = material.AlbedoColor;
+        albedoColor.A = 1f;
+        material.AlbedoColor = albedoColor;
+        material.Transparency = BaseMaterial3D.TransparencyEnum.Disabled;
+        material.NoDepthTest = false;
+        material.DistanceFadeMode = BaseMaterial3D.DistanceFadeModeEnum.Disabled;
     }
 
     private bool CanSeePlayer(Vector2I monsterCell, Vector2I playerCell, int maxRangeCells)
