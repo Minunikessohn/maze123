@@ -114,6 +114,7 @@ public partial class Main : Node
         _dayNightController.NightStarted += OnNightStarted;
         _monsterManager.BindDayNightController(_dayNightController);
         _monsterManager.BindTrapManager(_trapManager);
+        _monsterManager.PlayerSpotted += OnMonsterPlayerSpotted;
         _pauseMenu.SetVisualSettings(_sessionState.VisualSettings);
         _pauseMenu.SetAudioSettings(_sessionState.AudioSettings);
         RefreshSaveSlots();
@@ -183,6 +184,11 @@ public partial class Main : Node
     }
 
     public override void _ExitTree() => GD.Print("[Main] _ExitTree.");
+
+    private void OnMonsterPlayerSpotted(MonsterController monster)
+    {
+        _audioController.PlayMonsterScreech();
+    }
 
     private void OnGenerateRequested(int width, int height, string generatorId)
     {

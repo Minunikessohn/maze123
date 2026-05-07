@@ -10,6 +10,7 @@ namespace Maze.Gameplay.Monster;
 public partial class MonsterController : Node3D
 {
     private const string DefaultImportedModelScenePath = "res://assets/monsters/Slenderman Model 3.fbx";
+    private const float PlayerSpottedScreechCooldownSeconds = 20f;
 
     public enum MonsterState
     {
@@ -68,6 +69,7 @@ public partial class MonsterController : Node3D
     private MeshInstance3D? _fallbackBody;
     private bool _hasImportedVisuals;
     private OmniLight3D? _glowLight;
+    private float _playerSpottedScreechCooldownRemaining;
 
     public Vector2I SpawnCell { get; private set; }
     public Vector2I CurrentCell { get; private set; }
@@ -76,6 +78,7 @@ public partial class MonsterController : Node3D
     public Vector2I? LastSeenPlayerCell { get; private set; }
     public MonsterState CurrentState { get; private set; } = MonsterState.Idle;
     public event Action<MonsterController, Vector2I>? CellChanged;
+    public event Action<MonsterController>? PlayerSpotted;
 
     public Vector3 StunAnchorGlobalPosition => GlobalPosition;
 
@@ -108,6 +111,7 @@ public partial class MonsterController : Node3D
     {
         float deltaSeconds = (float)delta;
         _hoverTime += deltaSeconds * HoverSpeed;
+        _playerSpottedScreechCooldownRemaining = Mathf.Max(0f, _playerSpottedScreechCooldownRemaining - deltaSeconds);
 
         if (CurrentState == MonsterState.Stunned)
         {
@@ -164,6 +168,7 @@ public partial class MonsterController : Node3D
         _chaseMemoryRemaining = 0f;
         _searchElapsed = 0f;
         _stunElapsed = 0f;
+        _playerSpottedScreechCooldownRemaining = 0f;
         _previousCell = null;
         CanSeePlayerNow = false;
         LastSeenPlayerCell = null;
@@ -406,11 +411,18 @@ public partial class MonsterController : Node3D
             return;
         }
 
+        bool couldSeePlayerBefore = CanSeePlayerNow;
         CanSeePlayerNow = CanSeePlayer(CurrentCell, playerCell, MaxSightRangeCells);
         if (!CanSeePlayerNow)
         {
             RefreshVisibility();
             return;
+        }
+
+        if (!couldSeePlayerBefore && _playerSpottedScreechCooldownRemaining <= 0f)
+        {
+            _playerSpottedScreechCooldownRemaining = PlayerSpottedScreechCooldownSeconds;
+            PlayerSpotted?.Invoke(this);
         }
 
         LastSeenPlayerCell = playerCell;

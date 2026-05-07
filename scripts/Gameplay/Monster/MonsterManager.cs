@@ -1,5 +1,6 @@
 #nullable enable
 
+using System;
 using System.Collections.Generic;
 using Godot;
 using Maze.Game;
@@ -36,6 +37,7 @@ public partial class MonsterManager : Node3D
     private bool _requiresSpawn = true;
 
     public IReadOnlyList<Vector2I> ActiveMonsterCells => _activeMonsterCells;
+    public event Action<MonsterController>? PlayerSpotted;
 
     public override void _Ready()
     {
@@ -253,6 +255,7 @@ public partial class MonsterManager : Node3D
             MonsterController monster = _monsterScene.Instantiate<MonsterController>();
             AddChild(monster);
             monster.CellChanged += OnMonsterCellChanged;
+            monster.PlayerSpotted += OnMonsterPlayerSpotted;
             monster.Configure(_maze!, spawnCell, _cellSize, _config?.MonsterCanBeStunned ?? false);
             monster.SetPlayerCell(_playerCell);
             _monsterIndices[monster] = _activeMonsterCells.Count;
@@ -298,6 +301,7 @@ public partial class MonsterManager : Node3D
         MonsterController monster = _activeMonsters[removedIndex];
 
         monster.CellChanged -= OnMonsterCellChanged;
+        monster.PlayerSpotted -= OnMonsterPlayerSpotted;
         _monsterIndices.Remove(monster);
         _stunOverlapMonsters.Remove(monster);
 
@@ -337,5 +341,10 @@ public partial class MonsterManager : Node3D
         {
             DespawnMonster(monster);
         }
+    }
+
+    private void OnMonsterPlayerSpotted(MonsterController monster)
+    {
+        PlayerSpotted?.Invoke(monster);
     }
 }

@@ -10,6 +10,7 @@ namespace Maze.Audio;
 public partial class HorrorAudioController : Node
 {
 	private const string AudioRootPath = "res://assets/audio/horror/";
+	private const string MonsterScreechFile = "dogwolf123-flying-monster-screech-02-461220.mp3";
 	private const float SilentDb = -80f;
 	private const float MaxMonsterAudibleDistanceCells = 8f;
 	private const float MonsterDangerDistanceCells = 3.5f;
@@ -46,8 +47,10 @@ public partial class HorrorAudioController : Node
 
 	private AudioStreamPlayer _footstepPlayer = null!;
 	private AudioStreamPlayer _monsterCuePlayer = null!;
+	private AudioStreamPlayer _monsterScreechPlayer = null!;
 	private AudioStreamPlayer _heartbeatPlayer = null!;
 	private AudioStreamPlayer _exhaustionPlayer = null!;
+	private AudioStream _monsterScreechStream = null!;
 	private AudioStream _heartbeatStream = null!;
 	private AudioStream _exhaustionStream = null!;
 	private AudioSettings _settings = new();
@@ -67,6 +70,7 @@ public partial class HorrorAudioController : Node
 	{
 		_footstepPlayer = CreatePlayer("Footsteps");
 		_monsterCuePlayer = CreatePlayer("MonsterCue");
+		_monsterScreechPlayer = CreatePlayer("MonsterScreech");
 		_heartbeatPlayer = CreatePlayer("Heartbeat");
 		_exhaustionPlayer = CreatePlayer("Exhaustion");
 
@@ -80,6 +84,7 @@ public partial class HorrorAudioController : Node
 			_monsterCueStreams.Add(LoadMp3Stream(AudioRootPath + file));
 		}
 
+		_monsterScreechStream = LoadMp3Stream(AudioRootPath + MonsterScreechFile);
 		_heartbeatStream = LoadMp3Stream(AudioRootPath + "soundreality-heart-beat-137135.mp3");
 		_exhaustionStream = LoadMp3Stream(AudioRootPath + "freesound_community-hear-race-and-give-out-78043.mp3");
 		ApplyPlayerVolumes();
@@ -145,6 +150,19 @@ public partial class HorrorAudioController : Node
 		_currentStamina = Mathf.Max(0f, current);
 		_maximumStamina = Mathf.Max(0.001f, maximum);
 		_isSprinting = sprinting;
+	}
+
+	public void PlayMonsterScreech()
+	{
+		if (!_gameplayActive || _settings.MasterVolume <= 0f || _settings.MonsterVolume <= 0f)
+		{
+			return;
+		}
+
+		_monsterScreechPlayer.Stream = _monsterScreechStream;
+		_monsterScreechPlayer.PitchScale = _random.RandfRange(0.98f, 1.03f);
+		_monsterScreechPlayer.VolumeDb = ToDecibels(_settings.MasterVolume * _settings.MonsterVolume * 0.92f);
+		_monsterScreechPlayer.Play();
 	}
 
 	private AudioStreamPlayer CreatePlayer(string name)
@@ -262,6 +280,7 @@ public partial class HorrorAudioController : Node
 	{
 		_footstepPlayer.VolumeDb = ToDecibels(_settings.MasterVolume * _settings.FootstepVolume * 0.55f);
 		_monsterCuePlayer.VolumeDb = ToDecibels(_settings.MasterVolume * _settings.MonsterVolume * 0.45f);
+		_monsterScreechPlayer.VolumeDb = ToDecibels(_settings.MasterVolume * _settings.MonsterVolume * 0.92f);
 		_heartbeatPlayer.VolumeDb = ToDecibels(_settings.MasterVolume * _settings.GoalVolume * 0.4f);
 		_exhaustionPlayer.VolumeDb = ToDecibels(_settings.MasterVolume * _settings.GoalVolume * 0.4f);
 	}
@@ -274,6 +293,7 @@ public partial class HorrorAudioController : Node
 		_exhaustionCooldownRemaining = 0f;
 		_footstepPlayer.Stop();
 		_monsterCuePlayer.Stop();
+		_monsterScreechPlayer.Stop();
 		_heartbeatPlayer.Stop();
 		_exhaustionPlayer.Stop();
 	}
