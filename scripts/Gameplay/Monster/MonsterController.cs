@@ -11,6 +11,7 @@ public partial class MonsterController : Node3D
 {
     private const string DefaultImportedModelScenePath = "res://assets/monsters/Slenderman Model 3.fbx";
     private const float PlayerSpottedScreechCooldownSeconds = 20f;
+    private const float DefaultPlayerWalkSpeedCellsPerSecond = 2.2f;
 
     public enum MonsterState
     {
@@ -34,7 +35,7 @@ public partial class MonsterController : Node3D
     [Export] public float HoverSpeed { get; set; } = 1.8f;
     [Export] public float StandHeight { get; set; } = 0.28f;
     [Export] public float MoveSpeedCellsPerSecond { get; set; } = 1.35f;
-    [Export] public float PauseBetweenMoves { get; set; } = 0.3f;
+    [Export] public float PlayerWalkSpeedFactor { get; set; } = 0.85f;
     [Export] public int MaxSightRangeCells { get; set; } = 13;
     [Export] public float IdleDurationSeconds { get; set; } = 0.35f;
     [Export] public float ChaseMemoryDurationSeconds { get; set; } = 5f;
@@ -47,8 +48,8 @@ public partial class MonsterController : Node3D
     private global::Maze.Model.Maze? _maze;
     private Vector2I? _playerCell;
     private float _cellSize = 1f;
+    private float _playerWalkSpeedCellsPerSecond = DefaultPlayerWalkSpeedCellsPerSecond;
     private float _hoverTime;
-    private float _pauseElapsed;
     private Vector3 _basePosition;
     private Vector3 _moveStartPosition;
     private Vector3 _moveTargetPosition;
@@ -126,7 +127,6 @@ public partial class MonsterController : Node3D
 
         if (CurrentState == MonsterState.Idle)
         {
-            _pauseElapsed = 0f;
             RefreshVisibility();
             ApplyHoverOffset();
             return;
@@ -135,14 +135,15 @@ public partial class MonsterController : Node3D
         if (_isMoving)
         {
             UpdateMovement(deltaSeconds);
-        }
-        else
-        {
-            _pauseElapsed += deltaSeconds;
-            if (_pauseElapsed >= PauseBetweenMoves)
+
+            if (!_isMoving && CurrentState != MonsterState.Idle)
             {
                 TryStartNextMove();
             }
+        }
+        else
+        {
+            TryStartNextMove();
         }
 
         RefreshVisibility();
@@ -157,7 +158,6 @@ public partial class MonsterController : Node3D
         _cellSize = Mathf.Max(0.1f, cellSize);
         CanBeStunned = canBeStunned;
         _hoverTime = 0f;
-        _pauseElapsed = 0f;
         _moveElapsed = 0f;
         _moveDuration = 0f;
         _isMoving = false;
@@ -198,7 +198,6 @@ public partial class MonsterController : Node3D
         _simulationPaused = false;
         SetProcess(true);
         _idleElapsed = IdleDurationSeconds;
-        _pauseElapsed = 0f;
         _stunElapsed = 0f;
         SetCurrentState(MonsterState.Idle);
         RefreshVisibility();
@@ -213,7 +212,6 @@ public partial class MonsterController : Node3D
         _simulationPaused = false;
         SetProcess(false);
         _isMoving = false;
-        _pauseElapsed = 0f;
         _idleElapsed = 0f;
         _chaseMemoryRemaining = 0f;
         _searchElapsed = 0f;
@@ -226,6 +224,11 @@ public partial class MonsterController : Node3D
     {
         _simulationPaused = paused;
         SetProcess(_isActive && !paused);
+    }
+
+    public void SetPlayerWalkSpeed(float playerWalkSpeedCellsPerSecond)
+    {
+        _playerWalkSpeedCellsPerSecond = Mathf.Max(0.1f, playerWalkSpeedCellsPerSecond);
     }
 
     public bool TryStun(float durationSeconds = -1f)
@@ -245,7 +248,6 @@ public partial class MonsterController : Node3D
         _isMoving = false;
         _moveElapsed = 0f;
         _moveDuration = 0f;
-        _pauseElapsed = 0f;
         _idleElapsed = 0f;
         _chaseMemoryRemaining = 0f;
         _searchElapsed = 0f;
@@ -279,7 +281,6 @@ public partial class MonsterController : Node3D
 
         _isMoving = false;
         _moveElapsed = 0f;
-        _pauseElapsed = 0f;
         _basePosition = _moveTargetPosition;
         UpdatePlayerVisibility();
         UpdateBehaviorState(0f);
@@ -350,11 +351,21 @@ public partial class MonsterController : Node3D
         CurrentCell = new Vector2I(nextCell.X, nextCell.Y);
         _moveStartPosition = _basePosition;
         _moveTargetPosition = CellToWorld(CurrentCell);
-        _moveDuration = 1f / Mathf.Max(0.1f, MoveSpeedCellsPerSecond);
+        _moveDuration = 1f / GetEffectiveMoveSpeedCellsPerSecond();
         _moveElapsed = 0f;
         _isMoving = true;
         SetCurrentState(nextState);
         FaceMovementDirection(_moveTargetPosition - _moveStartPosition);
+    }
+
+    private float GetEffectiveMoveSpeedCellsPerSecond()
+    {
+        if (_playerWalkSpeedCellsPerSecond > 0.1f)
+        {
+            return Mathf.Max(0.1f, _playerWalkSpeedCellsPerSecond * Mathf.Max(0.01f, PlayerWalkSpeedFactor));
+        }
+
+        return Mathf.Max(0.1f, MoveSpeedCellsPerSecond);
     }
 
     private bool AdvanceAlongPath(Vector2I targetCell, MonsterState nextState)

@@ -136,6 +136,7 @@ public partial class Main : Node
         _player.CellVisited += OnPlayerCellVisited;
         _player.StaminaChanged += OnPlayerStaminaChanged;
         _audioController.BindPlayer(_player);
+        _monsterManager.SetPlayerWalkSpeed(_player.ManualMoveSpeed);
 
         _runner.GenerationStepProduced += OnGenerationStepProduced;
         _runner.GenerationFinished += OnGenerationFinished;

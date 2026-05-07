@@ -34,6 +34,7 @@ public partial class MonsterManager : Node3D
     private global::Maze.Model.Maze? _maze;
     private Vector2I? _playerCell;
     private float _cellSize = 1f;
+    private float _playerWalkSpeedCellsPerSecond = 2.2f;
     private bool _requiresSpawn = true;
 
     public IReadOnlyList<Vector2I> ActiveMonsterCells => _activeMonsterCells;
@@ -127,6 +128,16 @@ public partial class MonsterManager : Node3D
         foreach (MonsterController monster in _activeMonsters)
         {
             monster.SetPlayerCell(playerCell);
+        }
+    }
+
+    public void SetPlayerWalkSpeed(float playerWalkSpeedCellsPerSecond)
+    {
+        _playerWalkSpeedCellsPerSecond = Mathf.Max(0.1f, playerWalkSpeedCellsPerSecond);
+
+        foreach (MonsterController monster in _activeMonsters)
+        {
+            monster.SetPlayerWalkSpeed(_playerWalkSpeedCellsPerSecond);
         }
     }
 
@@ -257,6 +268,7 @@ public partial class MonsterManager : Node3D
             monster.CellChanged += OnMonsterCellChanged;
             monster.PlayerSpotted += OnMonsterPlayerSpotted;
             monster.Configure(_maze!, spawnCell, _cellSize, _config?.MonsterCanBeStunned ?? false);
+            monster.SetPlayerWalkSpeed(_playerWalkSpeedCellsPerSecond);
             monster.SetPlayerCell(_playerCell);
             _monsterIndices[monster] = _activeMonsterCells.Count;
             _activeMonsterCells.Add(monster.CurrentCell);
