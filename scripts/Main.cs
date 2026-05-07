@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using Godot;
+using Maze.Audio;
 using Maze.Game;
 using Maze.Gameplay.Traps;
 using Maze.Gameplay.Monster;
@@ -39,6 +40,7 @@ public partial class Main : Node
     private CameraController2D _camera2D = null!;
     private CameraController3D _camera3D = null!;
     private PlayerCharacter3D _player = null!;
+    private HorrorAudioController _audioController = null!;
     private AlgorithmRunner _runner = null!;
     private DayNightController _dayNightController = null!;
     private MonsterManager _monsterManager = null!;
@@ -94,6 +96,7 @@ public partial class Main : Node
         _camera2D = _view2D.GetNode<CameraController2D>("Camera2D");
         _camera3D = _view3D.GetNode<CameraController3D>("Camera3D");
         _player = GetNode<PlayerCharacter3D>("MazeView3D/Player");
+        _audioController = GetNode<HorrorAudioController>("MazeView3D/HorrorAudioController");
         _runner = GetNode<AlgorithmRunner>("Runner");
         _dayNightController = GetNode<DayNightController>("DayNightController");
         _monsterManager = GetNode<MonsterManager>("MazeView3D/MonsterManager");
@@ -131,6 +134,7 @@ public partial class Main : Node
         _player.GoalReached += OnBotGoalReached;
         _player.CellVisited += OnPlayerCellVisited;
         _player.StaminaChanged += OnPlayerStaminaChanged;
+        _audioController.BindPlayer(_player);
 
         _runner.GenerationStepProduced += OnGenerationStepProduced;
         _runner.GenerationFinished += OnGenerationFinished;
@@ -672,6 +676,7 @@ public partial class Main : Node
     private void OnPlayerCellVisited(int x, int y)
     {
         Vector2I playerCell = new(x, y);
+        _audioController.UpdatePlayerCell(playerCell);
         _trapManager.NotifyPlayerEnteredCell(playerCell);
         _monsterManager.UpdatePlayerCell(playerCell);
         _view3D.MarkTrailCell(x, y);
@@ -762,6 +767,7 @@ public partial class Main : Node
         _player.DisableManualMode();
         _isManualMode = false;
         _sessionState.IsManualMode = false;
+        _audioController.UpdatePlayerCell(null);
         _view3D.ClearProximityEffects();
         _monsterManager.UpdatePlayerCell(null);
 
@@ -784,6 +790,7 @@ public partial class Main : Node
     private void OnPlayerStaminaChanged(float current, float maximum, bool sprinting)
     {
         _hud.SetStamina(current, maximum, sprinting);
+        _audioController.SetPlayerStamina(current, maximum, sprinting);
     }
 
     private void ApplyVisualSettings(VisualSettings settings)
@@ -799,6 +806,7 @@ public partial class Main : Node
     private void ApplyAudioSettings(AudioSettings settings)
     {
         _pauseMenu.SetAudioSettings(settings);
+        _audioController.SetAudioSettings(settings);
     }
 
     private void ResetExploreMode()
@@ -1141,6 +1149,7 @@ public partial class Main : Node
         _camera3D.SetProcessUnhandledInput(gameplayInputEnabled && _view3D.Visible);
         _runner.IsPaused = _flowState is GameFlowState.Boot or GameFlowState.MainMenu or GameFlowState.Paused;
         _dayNightController.SetPaused(_flowState != GameFlowState.Playing);
+        _audioController.SetGameplayState(showGameplay && _view3D.Visible, gameplayInputEnabled && _isManualMode && _view3D.Visible);
 
         if (!gameplayInputEnabled)
         {
@@ -1204,6 +1213,7 @@ public partial class Main : Node
             _monsterManager.Synchronize(MonsterSimulationMode.Inactive);
             _sessionState.ActiveMonsterCells.Clear();
             _view3D.SetMonsterCells(Array.Empty<Vector2I>());
+            _audioController.SetMonsterCells(Array.Empty<Vector2I>());
             _view3D.ApplyDayNightState(false, false, MazeGameConfig.DefaultNightViewDistance, 0f, false);
             return;
         }
@@ -1213,6 +1223,7 @@ public partial class Main : Node
         _sessionState.ActiveMonsterCells.Clear();
         _sessionState.ActiveMonsterCells.AddRange(_monsterManager.ActiveMonsterCells);
         _view3D.SetMonsterCells(_sessionState.ActiveMonsterCells);
+        _audioController.SetMonsterCells(_sessionState.ActiveMonsterCells);
         _view3D.ApplyDayNightState(
             _currentGameConfig.DayNightCycleEnabled,
             _currentGameConfig.DarkModeEnabled,
