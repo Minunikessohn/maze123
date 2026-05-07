@@ -1,5 +1,6 @@
 #nullable enable
 
+using System;
 using System.Collections.Generic;
 using Godot;
 using Maze.Model;
@@ -10,7 +11,7 @@ namespace Maze.Views;
 /// Die im 3D-Maze sichtbare Spielfigur. Haelt eine Liste von Wegpunkten
 /// (in Welt-Koordinaten) und interpoliert pro Frame zwischen ihnen.
 /// </summary>
-public partial class PlayerCharacter3D : Node3D
+public partial class PlayerCharacter3D : CharacterBody3D
 {
     [Signal] public delegate void GoalReachedEventHandler();
     [Signal] public delegate void CellVisitedEventHandler(int x, int y);
@@ -24,6 +25,7 @@ public partial class PlayerCharacter3D : Node3D
     [Export] public float StaminaRecoveryPerSecond = 0.8f;
     [Export] public float StaminaRecoveryDelaySeconds = 0.85f;
     [Export] public float StandHeight = 0f;
+    [Export] public float CollisionRadius = 0.18f;
 
     public enum Mode
     {
@@ -37,14 +39,9 @@ public partial class PlayerCharacter3D : Node3D
     private bool _isMoving;
     private float _cellSize = 1f;
     private global::Maze.Model.Maze? _manualMaze;
-    private Cell? _manualCell;
-    private Cell? _manualGoal;
+    private Vector2I? _manualGoalCell;
     private CameraController3D? _manualCamera;
-    private bool _isAnimatingCell;
-    private Vector3 _animFrom;
-    private Vector3 _animTo;
-    private float _animElapsed;
-    private float _animDuration;
+    private Vector2I? _currentPlayerCell;
     private LegoFigure? _figure;
     private bool _firstPersonActive;
     private float _currentStamina;
@@ -65,11 +62,11 @@ public partial class PlayerCharacter3D : Node3D
         _waypoints.Clear();
         _currentIndex = 0;
         _isMoving = false;
+        Velocity = Vector3.Zero;
         _figure?.SetWalking(false);
         _manualMaze = null;
-        _manualCell = null;
-        _manualGoal = null;
-        _isAnimatingCell = false;
+        _manualGoalCell = null;
+        _currentPlayerCell = null;
         _isSprinting = false;
         _isMoving = false;
         ResetStamina();
@@ -95,11 +92,13 @@ public partial class PlayerCharacter3D : Node3D
             return;
         }
 
+        _currentPlayerCell = null;
         Position = _waypoints[0];
         Visible = true;
-    EmitSignal(SignalName.CellVisited, path[0].X, path[0].Y);
+        UpdateCurrentPlayerCell(forceEmit: true);
         _currentIndex = 1;
         _isMoving = _waypoints.Count > 1;
+        Velocity = Vector3.Zero;
 
         if (!_isMoving)
         {
@@ -112,34 +111,34 @@ public partial class PlayerCharacter3D : Node3D
     {
         _cellSize = cellSize;
         _manualMaze = maze;
-        _manualCell = start;
-        _manualGoal = goal;
+        _manualGoalCell = new Vector2I(goal.X, goal.Y);
         _manualCamera = camera;
-        _isAnimatingCell = false;
         _waypoints.Clear();
         _currentIndex = 0;
         _isMoving = false;
         _isSprinting = false;
+        Velocity = Vector3.Zero;
         ResetStamina();
 
         Position = CellToWorld(start);
         Visible = true;
         CurrentMode = Mode.Manual;
-        EmitSignal(SignalName.CellVisited, start.X, start.Y);
+        _currentPlayerCell = null;
+        UpdateCurrentPlayerCell(forceEmit: true);
     }
 
     public void DisableManualMode()
     {
         _manualMaze = null;
-        _manualCell = null;
-        _manualGoal = null;
+        _manualGoalCell = null;
         _manualCamera = null;
-        _isAnimatingCell = false;
+        _currentPlayerCell = null;
         _figure?.SetWalking(false);
         _waypoints.Clear();
         _currentIndex = 0;
         _isMoving = false;
         _isSprinting = false;
+        Velocity = Vector3.Zero;
         ResetStamina();
         Visible = false;
         CurrentMode = Mode.Idle;
@@ -167,14 +166,17 @@ public partial class PlayerCharacter3D : Node3D
 
     public override void _Process(double delta)
     {
-        switch (CurrentMode)
+        if (CurrentMode == Mode.FollowingPath)
         {
-            case Mode.FollowingPath:
-                ProcessFollowPath(delta);
-                break;
-            case Mode.Manual:
-                ProcessManual(delta);
-                break;
+            ProcessFollowPath(delta);
+        }
+    }
+
+    public override void _PhysicsProcess(double delta)
+    {
+        if (CurrentMode == Mode.Manual)
+        {
+            ProcessManual(delta);
         }
     }
 
@@ -197,7 +199,7 @@ public partial class PlayerCharacter3D : Node3D
         if (step >= remaining)
         {
             Position = target;
-            EmitSignal(SignalName.CellVisited, WorldToCell(target).X, WorldToCell(target).Y);
+            UpdateCurrentPlayerCell();
             _currentIndex++;
             if (_currentIndex >= _waypoints.Count)
             {
@@ -215,72 +217,64 @@ public partial class PlayerCharacter3D : Node3D
 
     private void ProcessManual(double delta)
     {
-        if (_manualMaze is null || _manualCell is null || _manualGoal is null || _manualCamera is null)
+        if (_manualMaze is null || _manualGoalCell is null || _manualCamera is null)
         {
             _figure?.SetWalking(false);
             _isMoving = false;
             _isSprinting = false;
+            Velocity = Vector3.Zero;
             CurrentMode = Mode.Idle;
             return;
         }
 
+        float deltaSeconds = (float)delta;
+        Vector3 moveDirection = _manualCamera.GetGroundMoveDirectionForInput();
+        bool wantsToMove = moveDirection != Vector3.Zero;
+        bool wantsSprint = wantsToMove && CanSprintNow();
+        float movementSpeed = GetCurrentManualSpeed(wantsSprint);
+        Vector3 desiredMotion = wantsToMove ? moveDirection * movementSpeed * deltaSeconds : Vector3.Zero;
+        Vector3 actualMotion = ResolveManualMotion(desiredMotion);
+
+        if (deltaSeconds > 0f)
+        {
+            Velocity = new Vector3(actualMotion.X / deltaSeconds, 0f, actualMotion.Z / deltaSeconds);
+        }
+        else
+        {
+            Velocity = Vector3.Zero;
+        }
+
+        if (actualMotion.LengthSquared() > 0.000001f)
+        {
+            GlobalPosition += actualMotion;
+            _isMoving = true;
+            FaceMovementDirection(actualMotion);
+        }
+        else
+        {
+            _isMoving = false;
+            Velocity = Vector3.Zero;
+        }
+
+        _isSprinting = wantsSprint && _isMoving;
+        _figure?.SetWalking(_isMoving);
         UpdateStamina(delta);
-        _figure?.SetWalking(_isAnimatingCell);
-        _isMoving = _isAnimatingCell;
 
-        if (_isAnimatingCell)
-        {
-            _animElapsed += (float)delta;
-            float t = Mathf.Clamp(_animElapsed / _animDuration, 0f, 1f);
-            Position = _animFrom.Lerp(_animTo, t);
-
-            if (t >= 1f)
-            {
-                _isAnimatingCell = false;
-                _isMoving = false;
-                _figure?.SetWalking(false);
-                Position = _animTo;
-                EmitSignal(SignalName.CellVisited, _manualCell.X, _manualCell.Y);
-                if (_manualCell == _manualGoal)
-                {
-                    CurrentMode = Mode.Idle;
-                    EmitSignal(SignalName.GoalReached);
-                }
-            }
-
-            return;
-        }
-
-        Direction? direction = null;
-        if (Input.IsPhysicalKeyPressed(Key.W) || Input.IsPhysicalKeyPressed(Key.S) || Input.IsPhysicalKeyPressed(Key.A) || Input.IsPhysicalKeyPressed(Key.D))
-        {
-            direction = _manualCamera.GetFacingDirectionForInput();
-        }
-
-        if (direction is null || _manualCell.HasWall(direction.Value))
+        if (!UpdateCurrentPlayerCell() || _currentPlayerCell != _manualGoalCell)
         {
             return;
         }
 
-        Cell? next = _manualMaze.GetNeighbor(_manualCell, direction.Value);
-        if (next is null)
-        {
-            return;
-        }
-
-        _animFrom = Position;
-        _animTo = CellToWorld(next);
-        _animElapsed = 0f;
-        _isSprinting = CanSprintNow();
-        _animDuration = 1f / Mathf.Max(0.5f, GetCurrentManualSpeed());
-        _isAnimatingCell = true;
-        _isMoving = true;
-        _manualCell = next;
-        FaceMovementDirection(_animTo - _animFrom);
+        _isMoving = false;
+        _isSprinting = false;
+        Velocity = Vector3.Zero;
+        _figure?.SetWalking(false);
+        CurrentMode = Mode.Idle;
+        EmitSignal(SignalName.GoalReached);
     }
 
-    private float GetCurrentManualSpeed() =>
-        ManualMoveSpeed * (_isSprinting ? SprintMultiplier : 1f);
+    private float GetCurrentManualSpeed(bool sprinting) =>
+        ManualMoveSpeed * _cellSize * (sprinting ? SprintMultiplier : 1f);
 
     private bool CanSprintNow() =>
         Input.IsPhysicalKeyPressed(Key.Shift) && _currentStamina > 0.05f;
@@ -291,7 +285,7 @@ public partial class PlayerCharacter3D : Node3D
         bool previousSprintState = _isSprinting;
         float deltaSeconds = (float)delta;
 
-        if (_isAnimatingCell && _isSprinting)
+        if (_isMoving && _isSprinting)
         {
             _currentStamina = Mathf.Max(0f, _currentStamina - StaminaDrainPerSecond * deltaSeconds);
             _staminaRecoveryDelayRemaining = StaminaRecoveryDelaySeconds;
@@ -332,13 +326,105 @@ public partial class PlayerCharacter3D : Node3D
     private void EmitStaminaChanged() =>
         EmitSignal(SignalName.StaminaChanged, _currentStamina, MaxStamina, _isSprinting);
 
+    private Vector3 ResolveManualMotion(Vector3 desiredMotion)
+    {
+        if (_manualMaze is null || desiredMotion == Vector3.Zero)
+        {
+            return Vector3.Zero;
+        }
+
+        Vector3 resolvedPosition = GlobalPosition;
+        resolvedPosition.Y = StandHeight;
+
+        if (!Mathf.IsZeroApprox(desiredMotion.X))
+        {
+            resolvedPosition.X = ResolveAxisMotion(resolvedPosition, desiredMotion.X, horizontal: true);
+        }
+
+        if (!Mathf.IsZeroApprox(desiredMotion.Z))
+        {
+            resolvedPosition.Z = ResolveAxisMotion(resolvedPosition, desiredMotion.Z, horizontal: false);
+        }
+
+        resolvedPosition.Y = StandHeight;
+        return resolvedPosition - GlobalPosition;
+    }
+
+    private float ResolveAxisMotion(Vector3 position, float delta, bool horizontal)
+    {
+        if (_manualMaze is null)
+        {
+            return (horizontal ? position.X : position.Z) + delta;
+        }
+
+        float cellSize = Mathf.Max(0.001f, _cellSize);
+        float radius = Mathf.Clamp(CollisionRadius, 0.01f, cellSize * 0.49f);
+        Vector2I cell = WorldToCell(position);
+        Cell mazeCell = _manualMaze.GetCell(cell.X, cell.Y);
+
+        float nextValue = (horizontal ? position.X : position.Z) + delta;
+        float minValue = radius;
+        float maxValue = (horizontal ? _manualMaze.Width : _manualMaze.Height) * cellSize - radius;
+
+        if (horizontal)
+        {
+            if (mazeCell.HasWall(Direction.West))
+            {
+                minValue = Mathf.Max(minValue, cell.X * cellSize + radius);
+            }
+
+            if (mazeCell.HasWall(Direction.East))
+            {
+                maxValue = Mathf.Min(maxValue, (cell.X + 1) * cellSize - radius);
+            }
+        }
+        else
+        {
+            if (mazeCell.HasWall(Direction.North))
+            {
+                minValue = Mathf.Max(minValue, cell.Y * cellSize + radius);
+            }
+
+            if (mazeCell.HasWall(Direction.South))
+            {
+                maxValue = Mathf.Min(maxValue, (cell.Y + 1) * cellSize - radius);
+            }
+        }
+
+        return Mathf.Clamp(nextValue, minValue, maxValue);
+    }
+
+    private bool UpdateCurrentPlayerCell(bool forceEmit = false)
+    {
+        Vector2I cell = WorldToCell(GlobalPosition);
+        if (!forceEmit && _currentPlayerCell == cell)
+        {
+            return false;
+        }
+
+        _currentPlayerCell = cell;
+        EmitSignal(SignalName.CellVisited, cell.X, cell.Y);
+        return true;
+    }
+
     private Vector3 CellToWorld(Cell cell) =>
         new(cell.X * _cellSize + _cellSize / 2f, StandHeight, cell.Y * _cellSize + _cellSize / 2f);
 
     private Vector2I WorldToCell(Vector3 position) =>
         new(
-            Mathf.RoundToInt((position.X - _cellSize / 2f) / _cellSize),
-            Mathf.RoundToInt((position.Z - _cellSize / 2f) / _cellSize));
+            ClampCellCoordinate(Mathf.FloorToInt(position.X / Mathf.Max(0.001f, _cellSize)), horizontal: true),
+            ClampCellCoordinate(Mathf.FloorToInt(position.Z / Mathf.Max(0.001f, _cellSize)), horizontal: false));
+
+    private int ClampCellCoordinate(int value, bool horizontal)
+    {
+        if (_manualMaze is null)
+        {
+            return Math.Max(0, value);
+        }
+
+        int maximum = horizontal ? _manualMaze.Width - 1 : _manualMaze.Height - 1;
+        return Mathf.Clamp(value, 0, maximum);
+    }
 
     private void FaceMovementDirection(Vector3 movement)
     {

@@ -148,6 +148,9 @@ public partial class CameraController3D : Camera3D
         return WorldVectorToDirection(desired);
     }
 
+    public Vector3 GetGroundMoveDirectionForInput() =>
+        GetGroundMovementDirection(GetMoveInput());
+
     public override void _UnhandledInput(InputEvent @event)
     {
         if (!IsVisibleInTree())

@@ -43,7 +43,7 @@ current = true
 fov = 60.0
 script = ExtResource("2_camctl")
 
-[node name="Player" type="Node3D" parent="."]
+[node name="Player" type="CharacterBody3D" parent="."]
 visible = false
 script = ExtResource("3_player")
 
