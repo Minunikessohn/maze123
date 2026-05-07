@@ -37,6 +37,8 @@ public partial class MonsterController : Node3D
     [Export] public float SearchDurationSeconds { get; set; } = 1.6f;
     [Export] public float DefaultStunDurationSeconds { get; set; } = 2.4f;
     [Export] public float VisualScaleFactor { get; set; } = 1.05f;
+    [Export] public float RevealLingerSeconds { get; set; } = 0.7f;
+    [Export] public float RevealDistanceCells { get; set; } = 1.35f;
 
     private global::Maze.Model.Maze? _maze;
     private Vector2I? _playerCell;
@@ -49,10 +51,12 @@ public partial class MonsterController : Node3D
     private float _moveElapsed;
     private float _moveDuration;
     private bool _isMoving;
+    private bool _isActive;
     private bool _simulationPaused;
     private float _idleElapsed;
     private float _searchElapsed;
     private float _stunElapsed;
+    private float _revealRemaining;
     private Vector2I? _previousCell;
     private MeshInstance3D? _bodyMesh;
     private StandardMaterial3D? _bodyMaterial;
@@ -85,38 +89,42 @@ public partial class MonsterController : Node3D
 
     public override void _Process(double delta)
     {
-        _hoverTime += (float)delta * HoverSpeed;
+        float deltaSeconds = (float)delta;
+        _hoverTime += deltaSeconds * HoverSpeed;
 
         if (CurrentState == MonsterState.Stunned)
         {
-            UpdateStun((float)delta);
+            UpdateStun(deltaSeconds);
+            RefreshVisibility(deltaSeconds);
             ApplyHoverOffset();
             return;
         }
 
         UpdatePlayerVisibility();
-        UpdateBehaviorState((float)delta);
+        UpdateBehaviorState(deltaSeconds);
 
         if (CurrentState == MonsterState.Idle)
         {
             _pauseElapsed = 0f;
+            RefreshVisibility(deltaSeconds);
             ApplyHoverOffset();
             return;
         }
 
         if (_isMoving)
         {
-            UpdateMovement((float)delta);
+            UpdateMovement(deltaSeconds);
         }
         else
         {
-            _pauseElapsed += (float)delta;
+            _pauseElapsed += deltaSeconds;
             if (_pauseElapsed >= PauseBetweenMoves)
             {
                 TryStartNextMove();
             }
         }
 
+        RefreshVisibility(deltaSeconds);
         ApplyHoverOffset();
     }
 
@@ -132,10 +140,12 @@ public partial class MonsterController : Node3D
         _moveElapsed = 0f;
         _moveDuration = 0f;
         _isMoving = false;
+        _isActive = false;
         _simulationPaused = false;
         _idleElapsed = IdleDurationSeconds;
         _searchElapsed = 0f;
         _stunElapsed = 0f;
+        _revealRemaining = 0f;
         _previousCell = null;
         CanSeePlayerNow = false;
         LastSeenPlayerCell = null;
@@ -159,18 +169,22 @@ public partial class MonsterController : Node3D
 
     public void ActivateMonster()
     {
-        Visible = true;
+        _isActive = true;
+        Visible = false;
         _simulationPaused = false;
         SetProcess(true);
         _idleElapsed = IdleDurationSeconds;
         _pauseElapsed = 0f;
         _stunElapsed = 0f;
+        _revealRemaining = 0f;
         SetCurrentState(MonsterState.Idle);
+        RefreshVisibility(0f);
         CellChanged?.Invoke(this, CurrentCell);
     }
 
     public void DeactivateMonster()
     {
+        _isActive = false;
         Visible = false;
         _simulationPaused = false;
         SetProcess(false);
@@ -179,6 +193,7 @@ public partial class MonsterController : Node3D
         _idleElapsed = 0f;
         _searchElapsed = 0f;
         _stunElapsed = 0f;
+        _revealRemaining = 0f;
         SetCurrentState(MonsterState.Idle);
         Position = _basePosition;
     }
@@ -186,12 +201,12 @@ public partial class MonsterController : Node3D
     public void SetSimulationPaused(bool paused)
     {
         _simulationPaused = paused;
-        SetProcess(Visible && !paused);
+        SetProcess(_isActive && !paused);
     }
 
     public bool TryStun(float durationSeconds = -1f)
     {
-        if (!CanBeStunned || !Visible)
+        if (!CanBeStunned || !_isActive)
         {
             return false;
         }
@@ -210,6 +225,7 @@ public partial class MonsterController : Node3D
         _idleElapsed = 0f;
         _searchElapsed = 0f;
         _stunElapsed = effectiveDuration;
+        _revealRemaining = RevealLingerSeconds;
         CanSeePlayerNow = false;
         LastSeenPlayerCell = null;
         CurrentCell = WorldToCell(Position);
@@ -350,6 +366,7 @@ public partial class MonsterController : Node3D
             CanSeePlayerNow = false;
             LastSeenPlayerCell = null;
             _searchElapsed = 0f;
+            RefreshVisibility(0f);
             return;
         }
 
@@ -358,15 +375,60 @@ public partial class MonsterController : Node3D
         {
             LastSeenPlayerCell = null;
             _searchElapsed = 0f;
+            RefreshVisibility(0f);
             return;
         }
 
         LastSeenPlayerCell = playerCell;
         _searchElapsed = SearchDurationSeconds;
+        _revealRemaining = Mathf.Max(_revealRemaining, RevealLingerSeconds);
         if (!_isMoving)
         {
             FaceMovementDirection(CellToWorld(playerCell) - _basePosition);
         }
+
+        RefreshVisibility(0f);
+    }
+
+    private void RefreshVisibility(float delta)
+    {
+        if (!_isActive)
+        {
+            Visible = false;
+            return;
+        }
+
+        if (ShouldBeVisibleNow())
+        {
+            _revealRemaining = Mathf.Max(_revealRemaining, RevealLingerSeconds);
+        }
+        else if (delta > 0f)
+        {
+            _revealRemaining = Mathf.Max(0f, _revealRemaining - delta);
+        }
+
+        Visible = _revealRemaining > 0f;
+    }
+
+    private bool ShouldBeVisibleNow()
+    {
+        if (CurrentState == MonsterState.Stunned || CurrentState == MonsterState.Chase)
+        {
+            return true;
+        }
+
+        if (CanSeePlayerNow || CurrentState == MonsterState.Search)
+        {
+            return true;
+        }
+
+        if (_playerCell is not Vector2I playerCell)
+        {
+            return false;
+        }
+
+        Vector2 cellOffset = new(CurrentCell.X - playerCell.X, CurrentCell.Y - playerCell.Y);
+        return cellOffset.Length() <= Mathf.Max(0.1f, RevealDistanceCells);
     }
 
     private void UpdateBehaviorState(float delta)
