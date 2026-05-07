@@ -546,7 +546,7 @@ public partial class MazeView3D : Node3D
     }
 
     private Vector3 CellCenter(Cell cell) =>
-        new(cell.X * CellSize + CellSize / 2f, 0f, cell.Y * CellSize + CellSize / 2f);
+        global::Maze.MazeWorldGrid.CellToWorldCenter(cell, CellSize);
 
     private void RebuildTrail()
     {
@@ -573,7 +573,7 @@ public partial class MazeView3D : Node3D
         for (int index = 0; index < _trailCells.Count; index++)
         {
             Vector2I cell = _trailCells[index];
-            Vector3 center = new(cell.X * CellSize + CellSize / 2f, 0.02f, cell.Y * CellSize + CellSize / 2f);
+            Vector3 center = global::Maze.MazeWorldGrid.CellToWorldCenter(cell, CellSize, 0.02f);
             trailMesh.SetInstanceTransform(index, new Transform3D(Basis.Identity, center));
         }
     }

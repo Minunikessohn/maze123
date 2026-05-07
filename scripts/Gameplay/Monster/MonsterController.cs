@@ -659,12 +659,12 @@ public partial class MonsterController : Node3D
     }
 
     private Vector3 CellToWorld(Vector2I cell) =>
-        new(cell.X * _cellSize + _cellSize / 2f, StandHeight, cell.Y * _cellSize + _cellSize / 2f);
+        global::Maze.MazeWorldGrid.CellToWorldCenter(cell, _cellSize, StandHeight);
 
     private Vector2I WorldToCell(Vector3 position) =>
-        new(
-            Mathf.RoundToInt((position.X - _cellSize / 2f) / _cellSize),
-            Mathf.RoundToInt((position.Z - _cellSize / 2f) / _cellSize));
+        _maze is null
+            ? global::Maze.MazeWorldGrid.WorldToCell(position, _cellSize)
+            : global::Maze.MazeWorldGrid.WorldToCell(position, _cellSize, _maze.Width, _maze.Height);
 
     private void FaceMovementDirection(Vector3 movement)
     {

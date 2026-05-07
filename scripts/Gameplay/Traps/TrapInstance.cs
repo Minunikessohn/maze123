@@ -122,10 +122,7 @@ public partial class TrapInstance : Node3D
         TrapId = string.IsNullOrWhiteSpace(definition.TrapId) ? TrapDefinition.DefaultTrapId : definition.TrapId.Trim();
         Cell = definition.Cell;
         IsArmed = definition.IsArmed;
-        Position = new Vector3(
-            Cell.X * cellSize + cellSize / 2f,
-            HoverHeight,
-            Cell.Y * cellSize + cellSize / 2f);
+        Position = global::Maze.MazeWorldGrid.CellToWorldCenter(Cell, cellSize, HoverHeight);
 
         float scaleFactor = Mathf.Max(0.35f, cellSize);
         Scale = new Vector3(scaleFactor, 1f, scaleFactor);

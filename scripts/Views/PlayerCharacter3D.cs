@@ -378,6 +378,7 @@ public partial class PlayerCharacter3D : CharacterBody3D
         float radius = Mathf.Clamp(CollisionRadius, 0.01f, cellSize * 0.49f);
         Vector2I cell = WorldToCell(position);
         Cell mazeCell = _manualMaze.GetCell(cell.X, cell.Y);
+        Aabb cellBounds = global::Maze.MazeWorldGrid.GetCellBounds(cell, cellSize, StandHeight);
 
         float nextValue = (horizontal ? position.X : position.Z) + delta;
         float minValue = radius;
@@ -387,24 +388,24 @@ public partial class PlayerCharacter3D : CharacterBody3D
         {
             if (mazeCell.HasWall(Direction.West))
             {
-                minValue = Mathf.Max(minValue, cell.X * cellSize + radius);
+                minValue = Mathf.Max(minValue, cellBounds.Position.X + radius);
             }
 
             if (mazeCell.HasWall(Direction.East))
             {
-                maxValue = Mathf.Min(maxValue, (cell.X + 1) * cellSize - radius);
+                maxValue = Mathf.Min(maxValue, cellBounds.Position.X + cellBounds.Size.X - radius);
             }
         }
         else
         {
             if (mazeCell.HasWall(Direction.North))
             {
-                minValue = Mathf.Max(minValue, cell.Y * cellSize + radius);
+                minValue = Mathf.Max(minValue, cellBounds.Position.Z + radius);
             }
 
             if (mazeCell.HasWall(Direction.South))
             {
-                maxValue = Mathf.Min(maxValue, (cell.Y + 1) * cellSize - radius);
+                maxValue = Mathf.Min(maxValue, cellBounds.Position.Z + cellBounds.Size.Z - radius);
             }
         }
 
@@ -425,23 +426,12 @@ public partial class PlayerCharacter3D : CharacterBody3D
     }
 
     private Vector3 CellToWorld(Cell cell) =>
-        new(cell.X * _cellSize + _cellSize / 2f, StandHeight, cell.Y * _cellSize + _cellSize / 2f);
+        global::Maze.MazeWorldGrid.CellToWorldCenter(cell, _cellSize, StandHeight);
 
     private Vector2I WorldToCell(Vector3 position) =>
-        new(
-            ClampCellCoordinate(Mathf.FloorToInt(position.X / Mathf.Max(0.001f, _cellSize)), horizontal: true),
-            ClampCellCoordinate(Mathf.FloorToInt(position.Z / Mathf.Max(0.001f, _cellSize)), horizontal: false));
-
-    private int ClampCellCoordinate(int value, bool horizontal)
-    {
-        if (_manualMaze is null)
-        {
-            return Math.Max(0, value);
-        }
-
-        int maximum = horizontal ? _manualMaze.Width - 1 : _manualMaze.Height - 1;
-        return Mathf.Clamp(value, 0, maximum);
-    }
+        _manualMaze is null
+            ? global::Maze.MazeWorldGrid.WorldToCell(position, _cellSize)
+            : global::Maze.MazeWorldGrid.WorldToCell(position, _cellSize, _manualMaze.Width, _manualMaze.Height);
 
     private void FaceMovementDirection(Vector3 movement)
     {
