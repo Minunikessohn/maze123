@@ -51,6 +51,7 @@ public partial class Hud : CanvasLayer
     private Label _heightLabel = null!;
     private Label _speedLabel = null!;
     private Label _victoryLabel = null!;
+    private Label _statusLabel = null!;
     private float _effectsIntensity = 1f;
     private float _staminaRatio = 1f;
     private bool _staminaDepleted;
@@ -87,6 +88,7 @@ public partial class Hud : CanvasLayer
         _speedLabel = GetNode<Label>("Root/Margin/VBox/SpeedRow/SpeedLabel");
         _unboundedToggle = GetNode<CheckBox>("Root/Margin/VBox/SpeedRow/UnboundedToggle");
         _victoryLabel = GetNode<Label>("Root/Margin/VBox/VictoryLabel");
+        _statusLabel = GetNode<Label>("StaminaOverlay/Panel/Margin/VBox/StatusLabel");
 
         _widthSlider.MinValue = 5;
         _widthSlider.MaxValue = 1000;
@@ -232,6 +234,7 @@ public partial class Hud : CanvasLayer
     private void OnPlayManualToggled(bool active)
     {
         _victoryLabel.Text = string.Empty;
+        _statusLabel.Text = string.Empty;
         EmitSignal(SignalName.PlayManualToggle, active);
     }
 
@@ -287,6 +290,12 @@ public partial class Hud : CanvasLayer
         _playManualButton.SetPressedNoSignal(false);
     }
 
+    public void SetLocalStatus(string message)
+    {
+        _statusLabel.Text = message;
+        _statusLabel.Visible = !string.IsNullOrWhiteSpace(message);
+    }
+
     public void SetManualPlayActive(bool active) =>
         _playManualButton.SetPressedNoSignal(active);
 
@@ -318,6 +327,11 @@ public partial class Hud : CanvasLayer
     {
         _staminaOverlay.Visible = visible;
         _staminaExhaustionOverlay.Visible = visible && _effectsIntensity > 0f && _staminaDepleted;
+
+        if (!visible)
+        {
+            SetLocalStatus(string.Empty);
+        }
     }
 
     public void SetStamina(float current, float maximum, bool sprinting)

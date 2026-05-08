@@ -267,8 +267,8 @@ public partial class Main : Node
         Cell startCell = ResolveStartCell(_currentMaze);
         Cell localSpawnCell = ResolveLocalSpawnCell(startCell);
         _audioController.PlayMonsterBite();
+        _hud.SetLocalStatus("Monsterkontakt - zurueck zum Spawn.");
         _player.ResetManualPosition(localSpawnCell);
-        _view3D.ClearProximityEffects();
         _sessionState.GoalReached = false;
         UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
         {
@@ -280,6 +280,7 @@ public partial class Main : Node
             state.GoalReached = false;
             state.IsAlive = true;
         });
+        ApplyLocalPerceptionState(new Vector2I(localSpawnCell.X, localSpawnCell.Y), updateVisitedMap: false);
     }
 
     private void OnGenerateRequested(int width, int height, string generatorId)
@@ -935,6 +936,7 @@ public partial class Main : Node
 
         _sessionState.GoalReached = true;
         UpdatePlayerRuntimeState(LocalSessionPlayerId, state => state.GoalReached = true);
+        _hud.SetLocalStatus("Ziel erreicht.");
 
         if (_isManualMode)
         {
@@ -972,12 +974,9 @@ public partial class Main : Node
             state.IsMoving = _player.IsMoving;
             state.IsSprinting = _player.IsSprinting;
         });
-        _audioController.UpdatePlayerCell(playerCell);
+        _hud.SetLocalStatus(string.Empty);
         _trapManager.NotifyPlayerEnteredCell(playerCell);
-        _view3D.MarkTrailCell(x, y);
-        _view3D.UpdateMonsterProximity(playerCell);
-        _mapOverlay.MarkVisited(playerCell);
-        _mapOverlay.SetPlayerCell(playerCell);
+        ApplyLocalPerceptionState(playerCell);
     }
 
     private void OnPlayManualToggle(bool active)
@@ -1054,6 +1053,7 @@ public partial class Main : Node
         _followCamEnabled = true;
         _hud.SetFollowCamActive(true);
         _hud.SetStaminaVisible(true);
+        _hud.SetLocalStatus(string.Empty);
         ApplyPlayerCameraMode(true);
         RefreshAudioGameplayState();
 
@@ -1087,9 +1087,7 @@ public partial class Main : Node
             state.IsMoving = false;
             state.IsSprinting = false;
         });
-        _audioController.UpdatePlayerCell(null);
-        _view3D.ClearProximityEffects();
-        _mapOverlay.SetPlayerCell(null);
+        ClearLocalPerceptionState();
         SetMapOverlayVisible(false);
 
         ClearPlayerCameraModes();
@@ -1125,6 +1123,27 @@ public partial class Main : Node
         });
         _hud.SetStamina(current, maximum, sprinting);
         _audioController.SetPlayerStamina(current, maximum, sprinting);
+    }
+
+    private void ApplyLocalPerceptionState(Vector2I playerCell, bool updateVisitedMap = true)
+    {
+        _audioController.UpdatePlayerCell(playerCell);
+        _view3D.MarkTrailCell(playerCell.X, playerCell.Y);
+        _view3D.UpdateMonsterProximity(playerCell);
+
+        if (updateVisitedMap)
+        {
+            _mapOverlay.MarkVisited(playerCell);
+        }
+
+        _mapOverlay.SetPlayerCell(playerCell);
+    }
+
+    private void ClearLocalPerceptionState()
+    {
+        _audioController.UpdatePlayerCell(null);
+        _view3D.ClearProximityEffects();
+        _mapOverlay.SetPlayerCell(null);
     }
 
     private void ApplyVisualSettings(VisualSettings settings)
@@ -1571,6 +1590,13 @@ public partial class Main : Node
             activePeerIds.Add(playerSnapshot.Identity.PeerId);
             CachePlayerIdentity(playerSnapshot.Identity);
             _sessionState.SetPlayerState(playerSnapshot.Identity.PeerId, playerSnapshot.RuntimeState);
+
+            if (playerSnapshot.Identity.PeerId == LocalSessionPlayerId)
+            {
+                ApplyLocalPlayerSnapshot(playerSnapshot, updateVisitedMap: false);
+                continue;
+            }
+
             ApplyRemotePlayerSnapshot(playerSnapshot);
         }
 
@@ -1587,6 +1613,13 @@ public partial class Main : Node
 
         PlayerCharacter3D remoteAvatar = _view3D.EnsureRemotePlayerAvatar(_player, playerSnapshot.Identity.PeerId);
         remoteAvatar.AssignPeerId(playerSnapshot.Identity.PeerId);
+
+        if (!playerSnapshot.RuntimeState.IsManualMode || !playerSnapshot.RuntimeState.IsAlive)
+        {
+            remoteAvatar.Hide();
+            return;
+        }
+
         remoteAvatar.ApplyReplicatedRuntimeState(_currentMaze, ResolveGoalCell(_currentMaze), _view3D.CellSize, playerSnapshot.RuntimeState);
     }
 
@@ -1891,6 +1924,11 @@ public partial class Main : Node
 
     private void ApplyLocalSessionStartSnapshot(PlayerSnapshot playerSnapshot)
     {
+        ApplyLocalPlayerSnapshot(playerSnapshot, updateVisitedMap: true);
+    }
+
+    private void ApplyLocalPlayerSnapshot(PlayerSnapshot playerSnapshot, bool updateVisitedMap)
+    {
         if (_currentMaze is null)
         {
             return;
@@ -1905,10 +1943,11 @@ public partial class Main : Node
         if (!runtimeState.IsManualMode)
         {
             _player.DisableManualMode();
-            _audioController.UpdatePlayerCell(null);
-            _view3D.ClearProximityEffects();
+            _hud.SetStaminaVisible(false);
+            ClearLocalPerceptionState();
+            _hud.SetLocalStatus(runtimeState.GoalReached ? "Ziel erreicht." : string.Empty);
+            ApplyPlayerCameraMode();
             SyncMonsterPlayerTargets();
-            _mapOverlay.SetPlayerCell(null);
             return;
         }
 
@@ -1922,10 +1961,11 @@ public partial class Main : Node
         _audioController.UpdatePlayerCell(playerCell);
         _audioController.SetPlayerStamina(runtimeState.CurrentStamina, runtimeState.MaximumStamina, runtimeState.IsSprinting);
         SyncMonsterPlayerTargets();
-        _view3D.UpdateMonsterProximity(playerCell);
-        _mapOverlay.MarkVisited(playerCell);
-        _mapOverlay.SetPlayerCell(playerCell);
+        ApplyLocalPerceptionState(playerCell, updateVisitedMap);
+        _hud.SetStaminaVisible(true);
+        _hud.SetLocalStatus(runtimeState.GoalReached ? "Ziel erreicht." : string.Empty);
         _hud.SetStamina(runtimeState.CurrentStamina, runtimeState.MaximumStamina, runtimeState.IsSprinting);
+        ApplyPlayerCameraMode();
     }
 
     private static Cell ResolveSessionPoint(global::Maze.Model.Maze maze, Cell? sessionCell, int fallbackX, int fallbackY)

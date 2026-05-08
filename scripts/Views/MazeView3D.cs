@@ -147,6 +147,16 @@ public partial class MazeView3D : Node3D
         Roughness = 0.2f
     };
 
+    private static readonly StandardMaterial3D RemotePlayerMarkerMaterial = new()
+    {
+        AlbedoColor = new Color("#ffd166"),
+        EmissionEnabled = true,
+        Emission = new Color("#ffd166"),
+        EmissionEnergyMultiplier = 1.5f,
+        Metallic = 0.08f,
+        Roughness = 0.18f
+    };
+
     private global::Maze.Model.Maze? _maze;
 
     public override void _Ready()
@@ -265,6 +275,7 @@ public partial class MazeView3D : Node3D
         _remotePlayerContainer.AddChild(avatar);
         avatar.Hide();
         avatar.SetFirstPersonActive(false);
+        EnsureRemotePlayerMarker(avatar);
         _remotePlayers[peerId] = avatar;
         return avatar;
     }
@@ -296,6 +307,31 @@ public partial class MazeView3D : Node3D
             avatar.SetProcess(enabled);
             avatar.SetPhysicsProcess(enabled);
         }
+    }
+
+    private static void EnsureRemotePlayerMarker(PlayerCharacter3D avatar)
+    {
+        if (avatar.GetNodeOrNull<MeshInstance3D>("RemoteMarker") is not null)
+        {
+            return;
+        }
+
+        SphereMesh markerMesh = new()
+        {
+            Radius = 0.13f,
+            Height = 0.26f
+        };
+
+        MeshInstance3D marker = new()
+        {
+            Name = "RemoteMarker",
+            Mesh = markerMesh,
+            Position = new Vector3(0f, 1.25f, 0f),
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            MaterialOverride = RemotePlayerMarkerMaterial
+        };
+
+        avatar.AddChild(marker);
     }
 
     public void SetMonsterCells(IEnumerable<Vector2I> monsterCells)

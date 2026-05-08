@@ -47,6 +47,11 @@ value = 100.0
 show_percentage = false
 size_flags_horizontal = 3
 
+[node name="StatusLabel" type="Label" parent="StaminaOverlay/Panel/Margin/VBox"]
+visible = false
+modulate = Color(1, 0.88, 0.66, 1)
+text = ""
+
 [node name="Root" type="PanelContainer" parent="."]
 anchor_right = 1.0
 offset_bottom = 220.0
