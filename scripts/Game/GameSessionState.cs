@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Godot;
 using Maze.Game.Settings;
 using Maze.Model;
+using Maze.Network;
 
 namespace Maze.Game;
 
@@ -24,6 +25,11 @@ public sealed class GameSessionState
     public bool IsPlayerAlive { get; set; } = true;
     public bool GoalReached { get; set; }
     public bool IsManualMode { get; set; }
+    public SessionRole SessionRole { get; set; } = SessionRole.Offline;
+    public ConnectionStatus ConnectionStatus { get; set; } = ConnectionStatus.Offline;
+    public string ConnectionMessage { get; set; } = "Keine Sitzung aktiv.";
+    public long LocalPeerId { get; set; }
+    public List<long> ConnectedPeerIds { get; } = new();
     public VisualSettings VisualSettings { get; } = new();
     public AudioSettings AudioSettings { get; } = new();
 
@@ -44,5 +50,15 @@ public sealed class GameSessionState
         IsPlayerAlive = true;
         GoalReached = false;
         IsManualMode = false;
+    }
+
+    public void UpdateNetworkSession(SessionRole role, ConnectionStatus status, string message, IEnumerable<long> connectedPeerIds, long localPeerId)
+    {
+        SessionRole = role;
+        ConnectionStatus = status;
+        ConnectionMessage = string.IsNullOrWhiteSpace(message) ? "Keine Sitzung aktiv." : message;
+        LocalPeerId = localPeerId;
+        ConnectedPeerIds.Clear();
+        ConnectedPeerIds.AddRange(connectedPeerIds);
     }
 }

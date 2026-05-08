@@ -10,6 +10,7 @@ using Maze.Gameplay.Monster;
 using Maze.Game.Settings;
 using Maze.Generators;
 using Maze.Model;
+using Maze.Network;
 using Maze.Save;
 using Maze.Solvers;
 using Maze.UI;
@@ -47,6 +48,7 @@ public partial class Main : Node
     private DayNightController _dayNightController = null!;
     private MonsterManager _monsterManager = null!;
     private TrapManager _trapManager = null!;
+    private MultiplayerSession _multiplayerSession = null!;
     private SaveGameService _saveGameService = null!;
     private global::Maze.Model.Maze? _currentMaze;
     private global::Maze.Model.Maze? _lastMazeBuiltFor3D;
@@ -106,11 +108,19 @@ public partial class Main : Node
         _monsterManager = GetNode<MonsterManager>("MazeView3D/MonsterManager");
         _trapManager = GetNode<TrapManager>("MazeView3D/TrapManager");
         _saveGameService = new SaveGameService();
+        _multiplayerSession = new MultiplayerSession();
+        AddChild(_multiplayerSession);
 
         _mainMenu.StartNewMazeRequested += OnStartNewMazeRequested;
         _mainMenu.LoadMazeRequested += OnLoadMazeRequested;
         _mainMenu.DeleteMazeRequested += OnDeleteMazeRequested;
+        _mainMenu.HostSessionRequested += OnHostSessionRequested;
+        _mainMenu.JoinSessionRequested += OnJoinSessionRequested;
+        _mainMenu.LeaveSessionRequested += OnLeaveSessionRequested;
         _mainMenu.SetGeneratorOptions(BuildGeneratorMenuItems());
+        _multiplayerSession.StateChanged += OnMultiplayerSessionStateChanged;
+        _multiplayerSession.PeerJoined += OnMultiplayerPeerJoined;
+        _multiplayerSession.PeerLeft += OnMultiplayerPeerLeft;
         _pauseMenu.VisualSettingsChanged += OnVisualSettingsChanged;
         _pauseMenu.AudioSettingsChanged += OnAudioSettingsChanged;
         _pauseMenu.ReturnToMainMenuRequested += OnReturnToMainMenuRequested;
@@ -150,6 +160,8 @@ public partial class Main : Node
         ApplySimulationSpeed(DefaultStepsPerSecond);
         ApplyVisualSettings(_sessionState.VisualSettings);
         ApplyAudioSettings(_sessionState.AudioSettings);
+        SyncMultiplayerSessionState();
+        _mainMenu.SetSessionState(_sessionState.SessionRole, _sessionState.ConnectionStatus, _sessionState.ConnectionMessage);
         _view2D.SetCameraEnabled(_view2D.Visible);
         _mapOverlay.Visible = false;
         TransitionToState(GameFlowState.MainMenu);
@@ -201,7 +213,18 @@ public partial class Main : Node
         }
     }
 
-    public override void _ExitTree() => GD.Print("[Main] _ExitTree.");
+    public override void _ExitTree()
+    {
+        if (_multiplayerSession is not null)
+        {
+            _multiplayerSession.StateChanged -= OnMultiplayerSessionStateChanged;
+            _multiplayerSession.PeerJoined -= OnMultiplayerPeerJoined;
+            _multiplayerSession.PeerLeft -= OnMultiplayerPeerLeft;
+            _multiplayerSession.StopSession("Anwendung beendet.");
+        }
+
+        GD.Print("[Main] _ExitTree.");
+    }
 
     private void OnMonsterPlayerSpotted(MonsterController monster)
     {
@@ -225,6 +248,11 @@ public partial class Main : Node
 
     private void OnGenerateRequested(int width, int height, string generatorId)
     {
+        if (!CanRunLocalWorldAction("Neues Labyrinth"))
+        {
+            return;
+        }
+
         _pendingSaveDisplayName = string.Empty;
 
         if (StartNewGame(MazeGameConfig.CreateDefault(width, height, generatorId)))
@@ -276,6 +304,11 @@ public partial class Main : Node
 
     private void OnStartNewMazeRequested(string saveName, MazeGameConfig config)
     {
+        if (!CanRunLocalWorldAction("Neues Labyrinth"))
+        {
+            return;
+        }
+
         _pendingSaveDisplayName = saveName;
 
         if (!StartNewGame(config))
@@ -289,6 +322,11 @@ public partial class Main : Node
 
     private void OnLoadMazeRequested(string saveId)
     {
+        if (!CanRunLocalWorldAction("Spielstand laden"))
+        {
+            return;
+        }
+
         TransitionToState(GameFlowState.Loading);
 
         MazeSaveData? saveData = _saveGameService.LoadMaze(saveId);
@@ -311,6 +349,11 @@ public partial class Main : Node
 
     private void OnDeleteMazeRequested(string saveId)
     {
+        if (!CanRunLocalWorldAction("Spielstand loeschen"))
+        {
+            return;
+        }
+
         if (!_saveGameService.DeleteMaze(saveId))
         {
             GD.PrintErr($"[Main] Save konnte nicht geloescht werden: {saveId}");
@@ -541,6 +584,7 @@ public partial class Main : Node
 
     private void OnReturnToMainMenuRequested()
     {
+        _multiplayerSession.StopSession("Sitzung beendet. Zurueck im Hauptmenue.");
         StopManualMode(force: true);
         _runner.StopAll();
         _player.Hide();
@@ -553,6 +597,48 @@ public partial class Main : Node
         ClearPlayerCameraModes();
         RefreshSaveSlots();
         TransitionToState(GameFlowState.MainMenu);
+    }
+
+    private void OnHostSessionRequested(int port)
+    {
+        Error result = _multiplayerSession.StartHost(port);
+        if (result == Error.Ok)
+        {
+            GD.Print($"[Main] Host-Session gestartet auf Port {port}.");
+        }
+    }
+
+    private void OnJoinSessionRequested(string address, int port)
+    {
+        Error result = _multiplayerSession.JoinSession(address, port);
+        if (result == Error.Ok)
+        {
+            GD.Print($"[Main] Client-Verbindung gestartet zu {address}:{port}.");
+        }
+    }
+
+    private void OnLeaveSessionRequested()
+    {
+        _multiplayerSession.StopSession("Sitzung beendet.");
+    }
+
+    private void OnMultiplayerSessionStateChanged(SessionRole role, ConnectionStatus status, string message)
+    {
+        SyncMultiplayerSessionState();
+        _mainMenu.SetSessionState(role, status, message);
+        GD.Print($"[Main] Session-Status: Rolle={role}, Status={status}, Nachricht='{message}'");
+    }
+
+    private void OnMultiplayerPeerJoined(long peerId)
+    {
+        SyncMultiplayerSessionState();
+        GD.Print($"[Main] Peer verbunden: {peerId}");
+    }
+
+    private void OnMultiplayerPeerLeft(long peerId)
+    {
+        SyncMultiplayerSessionState();
+        GD.Print($"[Main] Peer getrennt: {peerId}");
     }
 
     private void OnStepRequested() =>
@@ -1064,6 +1150,32 @@ public partial class Main : Node
 
     private void RefreshSaveSlots() =>
         _mainMenu.SetSaveSlots(_saveGameService.ListSaves());
+
+    private void SyncMultiplayerSessionState()
+    {
+        _sessionState.UpdateNetworkSession(
+            _multiplayerSession.Role,
+            _multiplayerSession.Status,
+            _multiplayerSession.StatusMessage,
+            _multiplayerSession.ConnectedPeerIds,
+            _multiplayerSession.LocalPeerId);
+    }
+
+    private bool CanRunLocalWorldAction(string actionName)
+    {
+        if (_sessionState.SessionRole != SessionRole.Client && _sessionState.ConnectionStatus is not ConnectionStatus.Connecting)
+        {
+            return true;
+        }
+
+        string message = _sessionState.ConnectionStatus == ConnectionStatus.Connecting
+            ? $"{actionName} ist waehrend des Verbindungsaufbaus gesperrt."
+            : $"{actionName} ist fuer Clients in Phase 1 noch nicht verfuegbar.";
+
+        GD.PrintErr($"[Main] {message}");
+        _mainMenu.SetSessionState(_sessionState.SessionRole, _sessionState.ConnectionStatus, message);
+        return false;
+    }
 
     private Cell ResolveStartCell(global::Maze.Model.Maze maze) =>
         ResolveSessionPoint(maze, _sessionState.StartCell, 0, 0);
