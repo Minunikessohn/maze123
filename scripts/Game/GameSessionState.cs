@@ -137,8 +137,14 @@ public sealed class GameSessionState
         return new PlayerRuntimeState
         {
             CurrentCell = new MazePointSaveData(source.CurrentCell.X, source.CurrentCell.Y),
+            WorldX = source.WorldX,
+            WorldY = source.WorldY,
+            WorldZ = source.WorldZ,
+            RotationY = source.RotationY,
             CurrentStamina = source.CurrentStamina,
             MaximumStamina = source.MaximumStamina,
+            IsMoving = source.IsMoving,
+            IsSprinting = source.IsSprinting,
             IsAlive = source.IsAlive,
             GoalReached = source.GoalReached,
             IsManualMode = source.IsManualMode

@@ -32,6 +32,8 @@ public partial class Main : Node
     private const int MinimumTrapGoalDistance = 2;
     private const int PreferredTrapOpenNeighborCount = 3;
     private const int TrapSeedSalt = unchecked((int)0x5F3759DF);
+    private const double ClientSnapshotIntervalSeconds = 0.05d;
+    private const double HostSnapshotIntervalSeconds = 0.1d;
 
     private MainMenu _mainMenu = null!;
     private PauseMenu _pauseMenu = null!;
@@ -77,6 +79,7 @@ public partial class Main : Node
 
     private Random _random = new();
     private readonly PerformanceTracker _tracker = new();
+    private readonly Dictionary<long, PlayerIdentity> _playerIdentities = new();
     private MazeGameConfig? _currentGameConfig;
     private readonly GameSessionState _sessionState = new();
     private GameFlowState _flowState = GameFlowState.Boot;
@@ -88,6 +91,8 @@ public partial class Main : Node
     private bool _isManualMode;
     private bool _isMapOverlayVisible;
     private double _manualStartTimeSeconds;
+    private double _clientSnapshotAccumulator;
+    private double _hostSnapshotAccumulator;
     private string _pendingSaveDisplayName = string.Empty;
 
     private long LocalSessionPlayerId => _sessionState.EffectiveLocalPlayerId;
@@ -125,6 +130,8 @@ public partial class Main : Node
         _multiplayerSession.PeerLeft += OnMultiplayerPeerLeft;
         _multiplayerSession.SessionStartReceived += OnSessionStartReceived;
         _multiplayerSession.SessionStartAcknowledged += OnSessionStartAcknowledged;
+        _multiplayerSession.ClientPlayerSnapshotReceived += OnClientPlayerSnapshotReceived;
+        _multiplayerSession.PlayerSnapshotBatchReceived += OnPlayerSnapshotBatchReceived;
         _pauseMenu.VisualSettingsChanged += OnVisualSettingsChanged;
         _pauseMenu.AudioSettingsChanged += OnAudioSettingsChanged;
         _pauseMenu.ReturnToMainMenuRequested += OnReturnToMainMenuRequested;
@@ -191,6 +198,7 @@ public partial class Main : Node
         SyncDayNightState();
         SyncTrapState();
         UpdateMonsterStunCollision();
+        UpdatePlayerReplication(delta);
     }
 
     public override void _PhysicsProcess(double delta)
@@ -232,6 +240,8 @@ public partial class Main : Node
             _multiplayerSession.PeerLeft -= OnMultiplayerPeerLeft;
             _multiplayerSession.SessionStartReceived -= OnSessionStartReceived;
             _multiplayerSession.SessionStartAcknowledged -= OnSessionStartAcknowledged;
+            _multiplayerSession.ClientPlayerSnapshotReceived -= OnClientPlayerSnapshotReceived;
+            _multiplayerSession.PlayerSnapshotBatchReceived -= OnPlayerSnapshotBatchReceived;
             _multiplayerSession.StopSession("Anwendung beendet.");
         }
 
@@ -258,6 +268,10 @@ public partial class Main : Node
         UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
         {
             state.CurrentCell = new MazePointSaveData(startCell.X, startCell.Y);
+            state.SetWorldPosition(_player.GlobalPosition);
+            state.RotationY = _player.GlobalRotation.Y;
+            state.IsMoving = false;
+            state.IsSprinting = false;
             state.GoalReached = false;
             state.IsAlive = true;
         });
@@ -299,6 +313,7 @@ public partial class Main : Node
         _runner.StopAll();
         _solverPath.Clear();
         _player.Hide();
+        _view3D.ClearRemotePlayerAvatars();
         _view3D.ClearTrail();
         _view3D.ClearProximityEffects();
         _monsterManager.UpdatePlayerCell(null);
@@ -611,6 +626,8 @@ public partial class Main : Node
         StopManualMode(force: true);
         _runner.StopAll();
         _player.Hide();
+        _view3D.ClearRemotePlayerAvatars();
+        _playerIdentities.Clear();
         _view3D.ClearTrail();
         _view3D.ClearProximityEffects();
         ClearTrapRuntimeState(clearDefinitions: true);
@@ -667,6 +684,8 @@ public partial class Main : Node
     private void OnMultiplayerPeerLeft(long peerId)
     {
         _sessionState.RemovePlayerState(peerId);
+        _playerIdentities.Remove(peerId);
+        _view3D.RemoveRemotePlayerAvatar(peerId);
         SyncMultiplayerSessionState();
         _mainMenu.SetSessionState(
             _sessionState.SessionRole,
@@ -703,6 +722,28 @@ public partial class Main : Node
     private void OnSessionStartAcknowledged(long peerId, string sessionId)
     {
         GD.Print($"[Main] Client {peerId} hat Startvertrag {sessionId} bestaetigt.");
+    }
+
+    private void OnClientPlayerSnapshotReceived(long peerId, PlayerSnapshot playerSnapshot)
+    {
+        if (_currentMaze is null || peerId == LocalSessionPlayerId)
+        {
+            return;
+        }
+
+        CachePlayerIdentity(playerSnapshot.Identity);
+        _sessionState.SetPlayerState(peerId, playerSnapshot.RuntimeState);
+        ApplyRemotePlayerSnapshot(playerSnapshot);
+    }
+
+    private void OnPlayerSnapshotBatchReceived(PlayerSnapshotBatch snapshotBatch)
+    {
+        if (_currentMaze is null)
+        {
+            return;
+        }
+
+        ApplySessionPlayerSnapshots(snapshotBatch.Players);
     }
 
     private void OnStepRequested() =>
@@ -892,7 +933,14 @@ public partial class Main : Node
         }
 
         Vector2I playerCell = new(x, y);
-        UpdatePlayerRuntimeState(LocalSessionPlayerId, state => state.CurrentCell = MazePointSaveData.FromVector2I(playerCell));
+        UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
+        {
+            state.CurrentCell = MazePointSaveData.FromVector2I(playerCell);
+            state.SetWorldPosition(_player.GlobalPosition);
+            state.RotationY = _player.GlobalRotation.Y;
+            state.IsMoving = _player.IsMoving;
+            state.IsSprinting = _player.IsSprinting;
+        });
         _audioController.UpdatePlayerCell(playerCell);
         _trapManager.NotifyPlayerEnteredCell(playerCell);
         _monsterManager.UpdatePlayerCell(playerCell);
@@ -961,8 +1009,12 @@ public partial class Main : Node
             state.IsAlive = true;
             state.GoalReached = false;
             state.CurrentCell = new MazePointSaveData(_solverStart.X, _solverStart.Y);
+            state.SetWorldPosition(_player.GlobalPosition);
+            state.RotationY = _player.GlobalRotation.Y;
             state.CurrentStamina = _player.CurrentStamina;
             state.MaximumStamina = _player.MaximumStamina;
+            state.IsMoving = _player.IsMoving;
+            state.IsSprinting = _player.IsSprinting;
         });
         _manualStartTimeSeconds = Time.GetTicksMsec() / 1000.0;
         ApplyEffectiveRunnerMode();
@@ -998,7 +1050,12 @@ public partial class Main : Node
         _player.DisableManualMode();
         _isManualMode = false;
         _sessionState.IsManualMode = false;
-        UpdatePlayerRuntimeState(LocalSessionPlayerId, state => state.IsManualMode = false);
+        UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
+        {
+            state.IsManualMode = false;
+            state.IsMoving = false;
+            state.IsSprinting = false;
+        });
         _audioController.UpdatePlayerCell(null);
         _view3D.ClearProximityEffects();
         _monsterManager.UpdatePlayerCell(null);
@@ -1033,6 +1090,8 @@ public partial class Main : Node
         {
             state.CurrentStamina = current;
             state.MaximumStamina = maximum;
+            state.IsMoving = _player.IsMoving;
+            state.IsSprinting = sprinting;
         });
         _hud.SetStamina(current, maximum, sprinting);
         _audioController.SetPlayerStamina(current, maximum, sprinting);
@@ -1204,6 +1263,7 @@ public partial class Main : Node
             _runner.StopAll();
             _solverPath.Clear();
             _player.Hide();
+            _view3D.ClearRemotePlayerAvatars();
             _view3D.ClearTrail();
             ResetExploreMode();
             ClearPlayerCameraModes();
@@ -1266,6 +1326,7 @@ public partial class Main : Node
             return false;
         }
 
+        _view3D.ClearRemotePlayerAvatars();
         ApplySessionPlayerSnapshots(payload.Players);
         _sessionState.DayNightProgress = payload.World.DayNightProgress;
         UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
@@ -1304,6 +1365,7 @@ public partial class Main : Node
 
         MazePointSaveData startPoint = new(startCell.X, startCell.Y);
         IReadOnlyList<PlayerIdentity> playerIdentities = _multiplayerSession.BuildPlayerIdentities(startPoint);
+        CachePlayerIdentities(playerIdentities, clearMissing: true);
         List<PlayerSnapshot> players = new(playerIdentities.Count);
 
         foreach (PlayerIdentity playerIdentity in playerIdentities)
@@ -1312,7 +1374,7 @@ public partial class Main : Node
             _sessionState.SetPlayerState(playerIdentity.PeerId, runtimeState);
             players.Add(new PlayerSnapshot
             {
-                Identity = playerIdentity,
+                Identity = ClonePlayerIdentity(playerIdentity),
                 RuntimeState = runtimeState
             });
         }
@@ -1352,12 +1414,19 @@ public partial class Main : Node
         {
             Vector2I playerCell = _player.CurrentPlayerCell ?? new Vector2I(defaultSpawnCell.X, defaultSpawnCell.Y);
             state.CurrentCell = new MazePointSaveData(playerCell.X, playerCell.Y);
+            state.SetWorldPosition(_player.GlobalPosition);
+            state.RotationY = _player.GlobalRotation.Y;
             state.CurrentStamina = _player.CurrentStamina;
             state.MaximumStamina = _player.MaximumStamina;
+            state.IsMoving = _player.IsMoving;
+            state.IsSprinting = _player.IsSprinting;
             state.IsManualMode = _player.IsManualModeActive;
             state.GoalReached = _sessionState.GoalReached;
             state.IsAlive = _sessionState.IsPlayerAlive;
+            return state;
         }
+
+        state.SetWorldPosition(global::Maze.MazeWorldGrid.CellToWorldCenter(defaultSpawnCell.ToVector2I(), _view3D.CellSize));
 
         return state;
     }
@@ -1367,8 +1436,12 @@ public partial class Main : Node
         UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
         {
             state.CurrentCell = new MazePointSaveData(startCell.X, startCell.Y);
+            state.SetWorldPosition(global::Maze.MazeWorldGrid.CellToWorldCenter(startCell, _view3D.CellSize));
+            state.RotationY = 0f;
             state.CurrentStamina = 1f;
             state.MaximumStamina = 1f;
+            state.IsMoving = false;
+            state.IsSprinting = false;
             state.IsAlive = true;
             state.GoalReached = false;
             state.IsManualMode = false;
@@ -1377,9 +1450,42 @@ public partial class Main : Node
 
     private void ApplySessionPlayerSnapshots(IEnumerable<PlayerSnapshot> playerSnapshots)
     {
+        HashSet<long> activePeerIds = new();
+
         foreach (PlayerSnapshot playerSnapshot in playerSnapshots)
         {
+            activePeerIds.Add(playerSnapshot.Identity.PeerId);
+            CachePlayerIdentity(playerSnapshot.Identity);
             _sessionState.SetPlayerState(playerSnapshot.Identity.PeerId, playerSnapshot.RuntimeState);
+            ApplyRemotePlayerSnapshot(playerSnapshot);
+        }
+
+        PruneRemotePlayerAvatars(activePeerIds);
+    }
+
+    private void ApplyRemotePlayerSnapshot(PlayerSnapshot playerSnapshot)
+    {
+        if (_currentMaze is null || playerSnapshot.Identity.PeerId == LocalSessionPlayerId)
+        {
+            return;
+        }
+
+        PlayerCharacter3D remoteAvatar = _view3D.EnsureRemotePlayerAvatar(_player, playerSnapshot.Identity.PeerId);
+        remoteAvatar.AssignPeerId(playerSnapshot.Identity.PeerId);
+        remoteAvatar.ApplyReplicatedRuntimeState(_currentMaze, ResolveGoalCell(_currentMaze), _view3D.CellSize, playerSnapshot.RuntimeState);
+    }
+
+    private void PruneRemotePlayerAvatars(HashSet<long> activePeerIds)
+    {
+        foreach (long peerId in new List<long>(_playerIdentities.Keys))
+        {
+            if (peerId == LocalSessionPlayerId || activePeerIds.Contains(peerId))
+            {
+                continue;
+            }
+
+            _playerIdentities.Remove(peerId);
+            _view3D.RemoveRemotePlayerAvatar(peerId);
         }
     }
 
@@ -1394,8 +1500,14 @@ public partial class Main : Node
         return new PlayerRuntimeState
         {
             CurrentCell = new MazePointSaveData(state.CurrentCell.X, state.CurrentCell.Y),
+            WorldX = state.WorldX,
+            WorldY = state.WorldY,
+            WorldZ = state.WorldZ,
+            RotationY = state.RotationY,
             CurrentStamina = state.CurrentStamina,
             MaximumStamina = state.MaximumStamina,
+            IsMoving = state.IsMoving,
+            IsSprinting = state.IsSprinting,
             IsAlive = state.IsAlive,
             GoalReached = state.GoalReached,
             IsManualMode = state.IsManualMode
@@ -1414,6 +1526,155 @@ public partial class Main : Node
             _multiplayerSession.ConnectedPeerIds,
             _multiplayerSession.LocalPeerId);
         _player.AssignPeerId(LocalSessionPlayerId);
+
+        if (_multiplayerSession.Role == SessionRole.Offline)
+        {
+            _view3D.ClearRemotePlayerAvatars();
+            _playerIdentities.Clear();
+            ResetNetworkSnapshotTimers();
+        }
+    }
+
+    private void CachePlayerIdentities(IEnumerable<PlayerIdentity> playerIdentities, bool clearMissing)
+    {
+        HashSet<long> seenPeerIds = new();
+        foreach (PlayerIdentity playerIdentity in playerIdentities)
+        {
+            seenPeerIds.Add(playerIdentity.PeerId);
+            CachePlayerIdentity(playerIdentity);
+        }
+
+        if (!clearMissing)
+        {
+            return;
+        }
+
+        foreach (long peerId in new List<long>(_playerIdentities.Keys))
+        {
+            if (peerId == LocalSessionPlayerId || seenPeerIds.Contains(peerId))
+            {
+                continue;
+            }
+
+            _playerIdentities.Remove(peerId);
+            _view3D.RemoveRemotePlayerAvatar(peerId);
+        }
+    }
+
+    private void CachePlayerIdentity(PlayerIdentity playerIdentity)
+    {
+        _playerIdentities[playerIdentity.PeerId] = ClonePlayerIdentity(playerIdentity);
+    }
+
+    private static PlayerIdentity ClonePlayerIdentity(PlayerIdentity playerIdentity)
+    {
+        return new PlayerIdentity
+        {
+            PeerId = playerIdentity.PeerId,
+            PlayerName = playerIdentity.PlayerName,
+            PlayerSlot = playerIdentity.PlayerSlot,
+            IsHost = playerIdentity.IsHost,
+            AssignedSpawnCell = new MazePointSaveData(playerIdentity.AssignedSpawnCell.X, playerIdentity.AssignedSpawnCell.Y)
+        };
+    }
+
+    private void ResetNetworkSnapshotTimers()
+    {
+        _clientSnapshotAccumulator = 0d;
+        _hostSnapshotAccumulator = 0d;
+    }
+
+    private void UpdatePlayerReplication(double delta)
+    {
+        if (_currentMaze is null || !IsGameplayState())
+        {
+            ResetNetworkSnapshotTimers();
+            return;
+        }
+
+        switch (_multiplayerSession.Role)
+        {
+            case SessionRole.Client:
+                _clientSnapshotAccumulator += delta;
+                if (_clientSnapshotAccumulator < ClientSnapshotIntervalSeconds)
+                {
+                    return;
+                }
+
+                _clientSnapshotAccumulator = 0d;
+                if (TryBuildPlayerSnapshot(LocalSessionPlayerId, out PlayerSnapshot? localSnapshot))
+                {
+                    _multiplayerSession.SendLocalPlayerSnapshot(localSnapshot!);
+                }
+                break;
+
+            case SessionRole.Host:
+                _hostSnapshotAccumulator += delta;
+                if (_hostSnapshotAccumulator < HostSnapshotIntervalSeconds)
+                {
+                    return;
+                }
+
+                _hostSnapshotAccumulator = 0d;
+                PlayerSnapshotBatch snapshotBatch = BuildPlayerSnapshotBatch();
+                ApplySessionPlayerSnapshots(snapshotBatch.Players);
+                _multiplayerSession.BroadcastPlayerSnapshots(snapshotBatch);
+                break;
+
+            default:
+                ResetNetworkSnapshotTimers();
+                break;
+        }
+    }
+
+    private PlayerSnapshotBatch BuildPlayerSnapshotBatch()
+    {
+        PlayerSnapshotBatch snapshotBatch = new();
+
+        foreach (PlayerIdentity playerIdentity in GetOrderedPlayerIdentities())
+        {
+            if (TryBuildPlayerSnapshot(playerIdentity.PeerId, out PlayerSnapshot? snapshot))
+            {
+                snapshotBatch.Players.Add(snapshot!);
+            }
+        }
+
+        return snapshotBatch;
+    }
+
+    private bool TryBuildPlayerSnapshot(long peerId, out PlayerSnapshot? snapshot)
+    {
+        snapshot = null;
+        if (_currentMaze is null)
+        {
+            return false;
+        }
+
+        if (!_playerIdentities.TryGetValue(peerId, out PlayerIdentity? playerIdentity))
+        {
+            Cell startCell = ResolveStartCell(_currentMaze);
+            CachePlayerIdentities(_multiplayerSession.BuildPlayerIdentities(new MazePointSaveData(startCell.X, startCell.Y)), clearMissing: false);
+            if (!_playerIdentities.TryGetValue(peerId, out playerIdentity))
+            {
+                return false;
+            }
+        }
+
+        snapshot = new PlayerSnapshot
+        {
+            Identity = ClonePlayerIdentity(playerIdentity),
+            RuntimeState = CreatePlayerRuntimeState(playerIdentity, playerIdentity.AssignedSpawnCell)
+        };
+        return true;
+    }
+
+    private IEnumerable<PlayerIdentity> GetOrderedPlayerIdentities()
+    {
+        List<PlayerIdentity> orderedIdentities = new(_playerIdentities.Values);
+        orderedIdentities.Sort((left, right) => left.PlayerSlot != right.PlayerSlot
+            ? left.PlayerSlot.CompareTo(right.PlayerSlot)
+            : left.PeerId.CompareTo(right.PeerId));
+        return orderedIdentities;
     }
 
     private bool CanRunLocalWorldAction(string actionName)
@@ -1611,6 +1872,7 @@ public partial class Main : Node
         }
 
         _player.SetProcess(gameplayInputEnabled);
+        _view3D.SetRemotePlayerProcessing(gameplayInputEnabled && _view3D.Visible);
         _camera3D.SetProcess(gameplayInputEnabled && _view3D.Visible);
         _camera3D.SetProcessUnhandledInput(gameplayInputEnabled && _view3D.Visible);
         _runner.IsPaused = _flowState is GameFlowState.Boot or GameFlowState.MainMenu or GameFlowState.Paused;

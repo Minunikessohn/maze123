@@ -37,6 +37,8 @@ public partial class MultiplayerSession : Node
     public event Action<long>? PeerLeft;
     public event Action<SessionStartPayload>? SessionStartReceived;
     public event Action<long, string>? SessionStartAcknowledged;
+    public event Action<long, PlayerSnapshot>? ClientPlayerSnapshotReceived;
+    public event Action<PlayerSnapshotBatch>? PlayerSnapshotBatchReceived;
 
     public override void _Ready()
     {
@@ -220,6 +222,39 @@ public partial class MultiplayerSession : Node
         ApplyState(SessionRole.Client, ConnectionStatus.Synchronized, $"Startvertrag {sessionId} angewendet. Client ist synchronisiert.");
     }
 
+    public Error SendLocalPlayerSnapshot(PlayerSnapshot snapshot)
+    {
+        if (Role != SessionRole.Client || Multiplayer.MultiplayerPeer is null)
+        {
+            return Error.Unavailable;
+        }
+
+        string serializedSnapshot = JsonSerializer.Serialize(snapshot, JsonOptions);
+        RpcId(HostPeerId, nameof(ReceiveClientPlayerSnapshotRpc), serializedSnapshot);
+        return Error.Ok;
+    }
+
+    public Error BroadcastPlayerSnapshots(PlayerSnapshotBatch snapshotBatch)
+    {
+        if (Role != SessionRole.Host || Multiplayer.MultiplayerPeer is null)
+        {
+            return Error.Unavailable;
+        }
+
+        string serializedBatch = JsonSerializer.Serialize(snapshotBatch, JsonOptions);
+        foreach (long peerId in _connectedPeers.OrderBy(peerId => peerId))
+        {
+            if (peerId == LocalPeerId)
+            {
+                continue;
+            }
+
+            RpcId(peerId, nameof(ReceivePlayerSnapshotBatchRpc), serializedBatch);
+        }
+
+        return Error.Ok;
+    }
+
     private void OnPeerConnected(long peerId)
     {
         if (_connectedPeers.Add(peerId))
@@ -364,6 +399,66 @@ public partial class MultiplayerSession : Node
             ApplyState(SessionRole.Host, ConnectionStatus.Hosting, $"Client {senderPeerId} hat Startvertrag bestaetigt ({readyPeerCount}/{remotePeerCount}).");
             SessionStartAcknowledged?.Invoke(senderPeerId, sessionId);
         }
+    }
+
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.UnreliableOrdered)]
+    private void ReceiveClientPlayerSnapshotRpc(string snapshotJson)
+    {
+        if (Role != SessionRole.Host)
+        {
+            return;
+        }
+
+        long senderPeerId = Multiplayer.GetRemoteSenderId();
+        if (senderPeerId <= 0)
+        {
+            return;
+        }
+
+        PlayerSnapshot? snapshot;
+        try
+        {
+            snapshot = JsonSerializer.Deserialize<PlayerSnapshot>(snapshotJson, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[MultiplayerSession] Client-Snapshot konnte nicht gelesen werden: {ex.Message}");
+            return;
+        }
+
+        if (snapshot is null || snapshot.Identity.PeerId != senderPeerId)
+        {
+            return;
+        }
+
+        ClientPlayerSnapshotReceived?.Invoke(senderPeerId, snapshot);
+    }
+
+    [Rpc(MultiplayerApi.RpcMode.Authority, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.UnreliableOrdered)]
+    private void ReceivePlayerSnapshotBatchRpc(string snapshotBatchJson)
+    {
+        if (Role != SessionRole.Client)
+        {
+            return;
+        }
+
+        PlayerSnapshotBatch? snapshotBatch;
+        try
+        {
+            snapshotBatch = JsonSerializer.Deserialize<PlayerSnapshotBatch>(snapshotBatchJson, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[MultiplayerSession] Snapshot-Batch konnte nicht gelesen werden: {ex.Message}");
+            return;
+        }
+
+        if (snapshotBatch is null)
+        {
+            return;
+        }
+
+        PlayerSnapshotBatchReceived?.Invoke(snapshotBatch);
     }
 
     private void ApplyState(SessionRole role, ConnectionStatus status, string message)

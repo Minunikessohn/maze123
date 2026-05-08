@@ -55,6 +55,8 @@ public partial class MazeView3D : Node3D
     private readonly List<Vector2I> _trailCells = new();
     private readonly List<Vector2I> _monsterCells = new();
     private readonly HashSet<Vector2I> _trailCellSet = new();
+    private readonly Dictionary<long, PlayerCharacter3D> _remotePlayers = new();
+    private Node3D _remotePlayerContainer = null!;
     private Vector2I? _playerCell;
 
     private const float DaySunEnergy = 1.0f;
@@ -159,6 +161,8 @@ public partial class MazeView3D : Node3D
         _floorDetails = GetNode<MultiMeshInstance3D>("FloorDetails");
         _wallsHorizontal = GetNode<MultiMeshInstance3D>("WallContainer/WallsHorizontal");
         _wallsVertical = GetNode<MultiMeshInstance3D>("WallContainer/WallsVertical");
+        _remotePlayerContainer = new Node3D { Name = "RemotePlayers" };
+        AddChild(_remotePlayerContainer);
         InitializeAtmosphereDetails();
         InitializeTrail();
         InitializeMarkers();
@@ -207,6 +211,7 @@ public partial class MazeView3D : Node3D
         _floor.Mesh = null;
         ResetMultiMeshes();
         ClearTrail();
+        ClearRemotePlayerAvatars();
         _monsterCells.Clear();
         _playerCell = null;
         _proximityEffects.Clear();
@@ -245,6 +250,52 @@ public partial class MazeView3D : Node3D
         _trailCells.Clear();
         _trailCellSet.Clear();
         RebuildTrail();
+    }
+
+    public PlayerCharacter3D EnsureRemotePlayerAvatar(PlayerCharacter3D template, long peerId)
+    {
+        if (_remotePlayers.TryGetValue(peerId, out PlayerCharacter3D? existingAvatar))
+        {
+            return existingAvatar;
+        }
+
+        PlayerCharacter3D avatar = (PlayerCharacter3D)template.Duplicate((int)Node.DuplicateFlags.UseInstantiation);
+        avatar.Name = $"RemotePlayer_{peerId}";
+        avatar.AssignPeerId(peerId);
+        _remotePlayerContainer.AddChild(avatar);
+        avatar.Hide();
+        avatar.SetFirstPersonActive(false);
+        _remotePlayers[peerId] = avatar;
+        return avatar;
+    }
+
+    public void RemoveRemotePlayerAvatar(long peerId)
+    {
+        if (!_remotePlayers.Remove(peerId, out PlayerCharacter3D? avatar))
+        {
+            return;
+        }
+
+        avatar.QueueFree();
+    }
+
+    public void ClearRemotePlayerAvatars()
+    {
+        foreach (PlayerCharacter3D avatar in _remotePlayers.Values)
+        {
+            avatar.QueueFree();
+        }
+
+        _remotePlayers.Clear();
+    }
+
+    public void SetRemotePlayerProcessing(bool enabled)
+    {
+        foreach (PlayerCharacter3D avatar in _remotePlayers.Values)
+        {
+            avatar.SetProcess(enabled);
+            avatar.SetPhysicsProcess(enabled);
+        }
     }
 
     public void SetMonsterCells(IEnumerable<Vector2I> monsterCells)
