@@ -212,6 +212,27 @@ public partial class PlayerCharacter3D : CharacterBody3D
         EmitStaminaChanged();
     }
 
+    public void ApplyLocalManualRuntimeState(PlayerRuntimeState runtimeState)
+    {
+        if (CurrentMode != Mode.Manual || Authority != ControlAuthority.LocalInput)
+        {
+            return;
+        }
+
+        _staminaRecoveryDelayRemaining = 0f;
+        _currentStamina = Mathf.Max(0f, runtimeState.CurrentStamina);
+        _effectiveMaximumStamina = runtimeState.MaximumStamina > 0f ? runtimeState.MaximumStamina : MaxStamina;
+        _isSprinting = runtimeState.IsSprinting;
+        _isMoving = runtimeState.IsMoving;
+        Velocity = Vector3.Zero;
+        _currentPlayerCell = runtimeState.CurrentCell.ToVector2I();
+        GlobalPosition = runtimeState.GetWorldPosition();
+        Rotation = new Vector3(0f, runtimeState.RotationY, 0f);
+        _figure?.SetWalking(_isMoving);
+        Visible = true;
+        EmitStaminaChanged();
+    }
+
     public void DisableManualMode()
     {
         _manualMaze = null;
