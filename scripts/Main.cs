@@ -90,6 +90,8 @@ public partial class Main : Node
     private double _manualStartTimeSeconds;
     private string _pendingSaveDisplayName = string.Empty;
 
+    private long LocalSessionPlayerId => _sessionState.EffectiveLocalPlayerId;
+
     public override void _Ready()
     {
         _mainMenu = GetNode<MainMenu>("MainMenu");
@@ -252,6 +254,12 @@ public partial class Main : Node
         _player.ResetManualPosition(startCell);
         _view3D.ClearProximityEffects();
         _sessionState.GoalReached = false;
+        UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
+        {
+            state.CurrentCell = new MazePointSaveData(startCell.X, startCell.Y);
+            state.GoalReached = false;
+            state.IsAlive = true;
+        });
         _monsterManager.UpdatePlayerWorldPosition(_player.GlobalPosition);
     }
 
@@ -414,6 +422,7 @@ public partial class Main : Node
         _sessionState.GoalReached = false;
         _sessionState.StartCell = _currentMaze.GetCell(0, 0);
         _sessionState.GoalCell = _currentMaze.GetCell(_currentMaze.Width - 1, _currentMaze.Height - 1);
+        ResetLocalPlayerRuntimeState(_sessionState.StartCell);
         EnsureMonsterSpawnCells();
         EnsureTrapDefinitions();
         ConfigureTrapSystem();
@@ -471,6 +480,7 @@ public partial class Main : Node
         _sessionState.StartCell = _solverStart;
         _sessionState.GoalCell = _solverGoal;
         _sessionState.GoalReached = false;
+        ResetLocalPlayerRuntimeState(_solverStart);
         _solverStart.State = CellState.Start;
         _solverGoal.State = CellState.Goal;
         _view2D.Refresh();
@@ -644,12 +654,25 @@ public partial class Main : Node
     private void OnMultiplayerPeerJoined(long peerId)
     {
         SyncMultiplayerSessionState();
+        _mainMenu.SetSessionState(
+            _sessionState.SessionRole,
+            _sessionState.ConnectionStatus,
+            _sessionState.ConnectionMessage,
+            _sessionState.ConnectedPeerIds,
+            _sessionState.LocalPeerId);
         GD.Print($"[Main] Peer verbunden: {peerId}");
     }
 
     private void OnMultiplayerPeerLeft(long peerId)
     {
+        _sessionState.RemovePlayerState(peerId);
         SyncMultiplayerSessionState();
+        _mainMenu.SetSessionState(
+            _sessionState.SessionRole,
+            _sessionState.ConnectionStatus,
+            _sessionState.ConnectionMessage,
+            _sessionState.ConnectedPeerIds,
+            _sessionState.LocalPeerId);
         GD.Print($"[Main] Peer getrennt: {peerId}");
     }
 
@@ -711,6 +734,10 @@ public partial class Main : Node
 
         _currentMaze.ResetSolverState();
         _sessionState.GoalReached = false;
+        if (_sessionState.StartCell is not null)
+        {
+            ResetLocalPlayerRuntimeState(_sessionState.StartCell);
+        }
         RebuildTrapRuntimeState();
         TransitionToState(GameFlowState.Playing);
         _view2D.ForceRefresh();
@@ -829,6 +856,7 @@ public partial class Main : Node
     private void OnBotGoalReached()
     {
         _sessionState.GoalReached = true;
+        UpdatePlayerRuntimeState(LocalSessionPlayerId, state => state.GoalReached = true);
 
         if (_isManualMode)
         {
@@ -853,6 +881,7 @@ public partial class Main : Node
     private void OnPlayerCellVisited(int x, int y)
     {
         Vector2I playerCell = new(x, y);
+        UpdatePlayerRuntimeState(LocalSessionPlayerId, state => state.CurrentCell = MazePointSaveData.FromVector2I(playerCell));
         _audioController.UpdatePlayerCell(playerCell);
         _trapManager.NotifyPlayerEnteredCell(playerCell);
         _monsterManager.UpdatePlayerCell(playerCell);
@@ -901,6 +930,7 @@ public partial class Main : Node
         _sessionState.StartCell = _solverStart;
         _sessionState.GoalCell = _solverGoal;
         _sessionState.GoalReached = false;
+        ResetLocalPlayerRuntimeState(_solverStart);
         _solverStart.State = CellState.Start;
         _solverGoal.State = CellState.Goal;
         _view2D.ForceRefresh();
@@ -914,6 +944,15 @@ public partial class Main : Node
         _player.EnableManualMode(_currentMaze, _solverStart, _solverGoal, _view3D.CellSize, _camera3D);
         _isManualMode = true;
         _sessionState.IsManualMode = true;
+        UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
+        {
+            state.IsManualMode = true;
+            state.IsAlive = true;
+            state.GoalReached = false;
+            state.CurrentCell = new MazePointSaveData(_solverStart.X, _solverStart.Y);
+            state.CurrentStamina = _player.CurrentStamina;
+            state.MaximumStamina = _player.MaximumStamina;
+        });
         _manualStartTimeSeconds = Time.GetTicksMsec() / 1000.0;
         ApplyEffectiveRunnerMode();
 
@@ -948,6 +987,7 @@ public partial class Main : Node
         _player.DisableManualMode();
         _isManualMode = false;
         _sessionState.IsManualMode = false;
+        UpdatePlayerRuntimeState(LocalSessionPlayerId, state => state.IsManualMode = false);
         _audioController.UpdatePlayerCell(null);
         _view3D.ClearProximityEffects();
         _monsterManager.UpdatePlayerCell(null);
@@ -973,6 +1013,11 @@ public partial class Main : Node
 
     private void OnPlayerStaminaChanged(float current, float maximum, bool sprinting)
     {
+        UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
+        {
+            state.CurrentStamina = current;
+            state.MaximumStamina = maximum;
+        });
         _hud.SetStamina(current, maximum, sprinting);
         _audioController.SetPlayerStamina(current, maximum, sprinting);
     }
@@ -1160,6 +1205,7 @@ public partial class Main : Node
             _sessionState.StartCell = ResolveSavePoint(_currentMaze, saveData.StartCell, 0, 0);
             _sessionState.GoalCell = ResolveSavePoint(_currentMaze, saveData.GoalCell, _currentMaze.Width - 1, _currentMaze.Height - 1);
             _sessionState.IsRunning = true;
+            ResetLocalPlayerRuntimeState(_sessionState.StartCell);
             EnsureMonsterSpawnCells();
             ConfigureDayNightCycle(_currentGameConfig);
 
@@ -1204,10 +1250,14 @@ public partial class Main : Node
             return false;
         }
 
+        ApplySessionPlayerSnapshots(payload.Players);
         _sessionState.DayNightProgress = payload.World.DayNightProgress;
-        _sessionState.GoalReached = payload.World.GoalReached;
-        _sessionState.IsManualMode = false;
-        _isManualMode = false;
+        UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
+        {
+            state.GoalReached = payload.World.GoalReached || state.GoalReached;
+            state.IsManualMode = false;
+        });
+        _isManualMode = _sessionState.IsManualMode;
 
         if (_currentGameConfig is not null)
         {
@@ -1242,10 +1292,12 @@ public partial class Main : Node
 
         foreach (PlayerIdentity playerIdentity in playerIdentities)
         {
+            PlayerRuntimeState runtimeState = CreatePlayerRuntimeState(playerIdentity, startPoint);
+            _sessionState.SetPlayerState(playerIdentity.PeerId, runtimeState);
             players.Add(new PlayerSnapshot
             {
                 Identity = playerIdentity,
-                RuntimeState = CreatePlayerRuntimeState(playerIdentity, startPoint)
+                RuntimeState = runtimeState
             });
         }
 
@@ -1273,30 +1325,64 @@ public partial class Main : Node
 
     private PlayerRuntimeState CreatePlayerRuntimeState(PlayerIdentity playerIdentity, MazePointSaveData defaultSpawnCell)
     {
-        MazePointSaveData runtimeCell = defaultSpawnCell;
-        float currentStamina = 1f;
-        float maximumStamina = 1f;
-        bool isManualMode = false;
-        bool goalReached = false;
+        PlayerRuntimeState state = _sessionState.TryGetPlayerState(playerIdentity.PeerId, out PlayerRuntimeState existingState)
+            ? ClonePlayerRuntimeState(existingState)
+            : new PlayerRuntimeState
+            {
+                CurrentCell = new MazePointSaveData(defaultSpawnCell.X, defaultSpawnCell.Y)
+            };
 
         if (playerIdentity.PeerId == _multiplayerSession.LocalPeerId && _player.Visible)
         {
             Vector2I playerCell = _player.CurrentPlayerCell ?? new Vector2I(defaultSpawnCell.X, defaultSpawnCell.Y);
-            runtimeCell = new MazePointSaveData(playerCell.X, playerCell.Y);
-            currentStamina = _player.CurrentStamina;
-            maximumStamina = _player.MaximumStamina;
-            isManualMode = _player.CurrentMode == PlayerCharacter3D.Mode.Manual;
-            goalReached = _sessionState.GoalReached;
+            state.CurrentCell = new MazePointSaveData(playerCell.X, playerCell.Y);
+            state.CurrentStamina = _player.CurrentStamina;
+            state.MaximumStamina = _player.MaximumStamina;
+            state.IsManualMode = _player.CurrentMode == PlayerCharacter3D.Mode.Manual;
+            state.GoalReached = _sessionState.GoalReached;
+            state.IsAlive = _sessionState.IsPlayerAlive;
         }
 
+        return state;
+    }
+
+    private void ResetLocalPlayerRuntimeState(Cell startCell)
+    {
+        UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
+        {
+            state.CurrentCell = new MazePointSaveData(startCell.X, startCell.Y);
+            state.CurrentStamina = 1f;
+            state.MaximumStamina = 1f;
+            state.IsAlive = true;
+            state.GoalReached = false;
+            state.IsManualMode = false;
+        });
+    }
+
+    private void ApplySessionPlayerSnapshots(IEnumerable<PlayerSnapshot> playerSnapshots)
+    {
+        foreach (PlayerSnapshot playerSnapshot in playerSnapshots)
+        {
+            _sessionState.SetPlayerState(playerSnapshot.Identity.PeerId, playerSnapshot.RuntimeState);
+        }
+    }
+
+    private void UpdatePlayerRuntimeState(long peerId, Action<PlayerRuntimeState> update)
+    {
+        PlayerRuntimeState state = _sessionState.GetOrCreatePlayerState(peerId);
+        update(state);
+    }
+
+    private static PlayerRuntimeState ClonePlayerRuntimeState(PlayerRuntimeState state)
+    {
         return new PlayerRuntimeState
         {
-            CurrentCell = runtimeCell,
-            CurrentStamina = currentStamina,
-            MaximumStamina = maximumStamina,
-            IsAlive = _sessionState.IsPlayerAlive,
-            GoalReached = goalReached,
-            IsManualMode = isManualMode
+            CurrentCell = new MazePointSaveData(state.CurrentCell.X, state.CurrentCell.Y),
+            CurrentStamina = state.CurrentStamina,
+            MaximumStamina = state.MaximumStamina,
+            IsAlive = state.IsAlive,
+            GoalReached = state.GoalReached,
+            IsManualMode = state.IsManualMode
         };
     }
 
