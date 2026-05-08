@@ -81,12 +81,19 @@ public sealed class GameSessionState
         ConnectedPeerIds.Clear();
         ConnectedPeerIds.AddRange(connectedPeerIds.Distinct());
 
-        if (ConnectedPeerIds.Count == 0)
+        bool shouldKeepOfflineFallbackPeer = role == SessionRole.Offline
+            && status == ConnectionStatus.Offline
+            && LocalPeerId <= 0;
+
+        if (ConnectedPeerIds.Count == 0 && shouldKeepOfflineFallbackPeer)
         {
             ConnectedPeerIds.Add(EffectiveLocalPlayerId);
         }
 
-        EnsurePlayersRegistered(ConnectedPeerIds);
+        if (ConnectedPeerIds.Count > 0)
+        {
+            EnsurePlayersRegistered(ConnectedPeerIds);
+        }
     }
 
     public PlayerRuntimeState GetOrCreatePlayerState(long peerId)

@@ -377,6 +377,7 @@ public partial class MainMenu : Control
 
         string playerName = GetRequestedPlayerName();
         int peerCount = _connectedPeerIds.Count;
+        string peerIdSummary = _localPeerId > 0 ? $"Peer-ID {_localPeerId}" : "Peer-ID wird zugewiesen";
 
         _sessionSummaryLabel.Text = _currentSessionMode switch
         {
@@ -384,7 +385,7 @@ public partial class MainMenu : Control
                 ? $"Lokaler Host: {playerName} | Peer-ID {_localPeerId} | Verbundene Peers: {peerCount} | LAN-IP {FormatLocalHostAddressSummary()}"
                 : $"Bereit als Host: {playerName} | Port {(int)Math.Round(_sessionPortSpinBox.Value)}",
             SessionMode.Join => IsSessionActive()
-                ? $"Verbunden als {playerName} | Ziel {_sessionAddressEdit.Text.Trim()}:{(int)Math.Round(_sessionPortSpinBox.Value)} | Peer-ID {_localPeerId}"
+                ? $"Verbunden als {playerName} | Ziel {_sessionAddressEdit.Text.Trim()}:{(int)Math.Round(_sessionPortSpinBox.Value)} | {peerIdSummary}"
                 : $"Bereit zum Join als {playerName} | Ziel {_sessionAddressEdit.Text.Trim()}:{(int)Math.Round(_sessionPortSpinBox.Value)}",
             _ => "Keine Lobby aktiv. Offline-Laeufe verwenden nur lokale Saves und lokale Weltstarts."
         };
