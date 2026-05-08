@@ -17,7 +17,9 @@ public sealed class MazeSerializer
         Cell? startCell = null,
         Cell? goalCell = null,
         IEnumerable<TrapDefinition>? trapDefinitions = null,
-        IEnumerable<Vector2I>? monsterSpawnCells = null)
+        IEnumerable<Vector2I>? monsterSpawnCells = null,
+        MazeSaveKind saveKind = MazeSaveKind.OfflineSave,
+        string? sourceSessionId = null)
     {
         Cell resolvedStart = startCell ?? maze.GetCell(0, 0);
         Cell resolvedGoal = goalCell ?? maze.GetCell(maze.Width - 1, maze.Height - 1);
@@ -26,6 +28,8 @@ public sealed class MazeSerializer
         {
             DisplayName = string.IsNullOrWhiteSpace(displayName) ? "maze-save" : displayName.Trim(),
             CreatedAtUtc = DateTime.UtcNow,
+            SaveKind = saveKind,
+            SourceSessionId = string.IsNullOrWhiteSpace(sourceSessionId) ? string.Empty : sourceSessionId.Trim(),
             Config = config.Clone().Sanitize(),
             StartCell = new MazePointSaveData(resolvedStart.X, resolvedStart.Y),
             GoalCell = new MazePointSaveData(resolvedGoal.X, resolvedGoal.Y)
@@ -107,6 +111,7 @@ public sealed class MazeSerializer
             SaveId = saveData.SaveId,
             DisplayName = saveData.DisplayName,
             CreatedAtUtc = saveData.CreatedAtUtc,
+            SaveKind = saveData.SaveKind,
             Width = config.Width,
             Height = config.Height,
             GeneratorId = config.GeneratorId

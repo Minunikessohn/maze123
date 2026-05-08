@@ -4,11 +4,19 @@ using Godot;
 
 namespace Maze.Game;
 
+public enum MazeSaveKind
+{
+    OfflineSave,
+    HostSessionSnapshot
+}
+
 public sealed class MazeSaveData
 {
     public string SaveId { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public MazeSaveKind SaveKind { get; set; } = MazeSaveKind.OfflineSave;
+    public string SourceSessionId { get; set; } = string.Empty;
     public MazeGameConfig Config { get; set; } = new();
     public List<MazeCellSaveData> Cells { get; set; } = new();
     public MazePointSaveData StartCell { get; set; } = new();

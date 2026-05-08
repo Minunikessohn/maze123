@@ -317,7 +317,7 @@ public partial class MainMenu : Control
                 _modeTitleLabel.Text = "Neues Labyrinth";
                 _modeDescriptionLabel.Text = _currentSessionMode switch
                 {
-                    SessionMode.Host => "Du legst die Welt fuer die Lobby fest. Erst danach koennen Clients spaeter denselben autoritativen Lauf erhalten.",
+                    SessionMode.Host => "Du legst die Welt fuer die Lobby fest. Dieser Host-Start wird nicht automatisch als lokaler Save persistiert.",
                     SessionMode.Join => "Clients starten in Phase 2 keine eigene Welt. Verbinde zuerst mit einem Host und warte auf dessen Spielstart.",
                     _ => "Konfiguriere Groesse, Darstellung und spaetere Gameplay-Regeln fuer einen neuen Offline-Lauf."
                 };
@@ -331,13 +331,13 @@ public partial class MainMenu : Control
             case MenuMode.LoadMaze:
                 _modeTitleLabel.Text = "Gespeicherte Labyrinthe";
                 _modeDescriptionLabel.Text = _currentSessionMode == SessionMode.Host
-                    ? "Der Host waehlt einen lokalen Spielstand als gemeinsame Ausgangswelt fuer die Lobby."
+                    ? "Der Host waehlt einen lokalen Offline-Spielstand als gemeinsame Ausgangswelt fuer die Lobby."
                     : "Waehle einen vorhandenen Spielstand und setze das Labyrinth lokal mit gespeicherter Struktur fort.";
                 _actionButton.Text = _currentSessionMode == SessionMode.Host ? "Als Host laden" : "Offline laden";
                 break;
             default:
                 _modeTitleLabel.Text = "Labyrinth loeschen";
-                _modeDescriptionLabel.Text = "Entferne einen gespeicherten Spielstand dauerhaft aus dem lokalen Save-Ordner.";
+                _modeDescriptionLabel.Text = "Entferne einen lokalen Offline-Spielstand dauerhaft aus dem Save-Ordner. Diese Aktion bleibt ausserhalb von Multiplayer-Lobbys.";
                 _actionButton.Text = "Loeschen";
                 break;
         }
@@ -350,8 +350,8 @@ public partial class MainMenu : Control
             case SessionMode.Host:
                 _sessionModeTitleLabel.Text = "Host-Lobby";
                 _sessionModeDescriptionLabel.Text = IsSessionActive()
-                    ? "Die Lobby ist offen. Waehl darunter ein neues Labyrinth oder einen Save und starte den Lauf als Host."
-                    : "Starte zuerst einen Host. Danach bleibt das Menue offen, damit du den Weltstart fuer alle Clients festlegen kannst.";
+                    ? "Die Lobby ist offen. Waehl darunter ein neues Labyrinth oder einen lokalen Offline-Save und starte den Lauf als Host."
+                    : "Starte zuerst einen Host. Danach bleibt das Menue offen, damit du den Weltstart fuer alle Clients festlegen kannst, ohne die lokale Save-Bibliothek zu vermischen.";
                 break;
             case SessionMode.Join:
                 _sessionModeTitleLabel.Text = "Client-Beitritt";

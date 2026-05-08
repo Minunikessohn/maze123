@@ -286,7 +286,7 @@ public partial class Main : Node
 
     private void OnGenerateRequested(int width, int height, string generatorId)
     {
-        if (!CanRunLocalWorldAction("Neues Labyrinth"))
+        if (!CanRunWorldStartAction("Neues Labyrinth"))
         {
             return;
         }
@@ -343,7 +343,7 @@ public partial class Main : Node
 
     private void OnStartNewMazeRequested(string saveName, MazeGameConfig config)
     {
-        if (!CanRunLocalWorldAction("Neues Labyrinth"))
+        if (!CanRunWorldStartAction("Neues Labyrinth"))
         {
             return;
         }
@@ -361,7 +361,7 @@ public partial class Main : Node
 
     private void OnLoadMazeRequested(string saveId)
     {
-        if (!CanRunLocalWorldAction("Spielstand laden"))
+        if (!CanRunWorldStartAction("Spielstand laden"))
         {
             return;
         }
@@ -372,6 +372,20 @@ public partial class Main : Node
         if (saveData is null)
         {
             GD.PrintErr($"[Main] Save konnte nicht geladen werden: {saveId}");
+            TransitionToState(GameFlowState.MainMenu);
+            RefreshSaveSlots();
+            return;
+        }
+
+        if (saveData.SaveKind != MazeSaveKind.OfflineSave)
+        {
+            GD.PrintErr($"[Main] Save {saveId} ist kein lokaler Offline-Spielstand und kann nicht direkt geladen werden.");
+            _mainMenu.SetSessionState(
+                _sessionState.SessionRole,
+                _sessionState.ConnectionStatus,
+                "Nur lokale Offline-Saves duerfen direkt geladen werden.",
+                _sessionState.ConnectedPeerIds,
+                _sessionState.LocalPeerId);
             TransitionToState(GameFlowState.MainMenu);
             RefreshSaveSlots();
             return;
@@ -388,7 +402,7 @@ public partial class Main : Node
 
     private void OnDeleteMazeRequested(string saveId)
     {
-        if (!CanRunLocalWorldAction("Spielstand loeschen"))
+        if (!CanManageLocalSaveLibrary("Spielstand loeschen"))
         {
             return;
         }
@@ -1280,6 +1294,13 @@ public partial class Main : Node
             return;
         }
 
+        if (!CanPersistOfflineSave())
+        {
+            GD.Print("[Main] Lauf nicht lokal gespeichert, weil die aktuelle Welt als Host-Session gestartet wurde.");
+            _pendingSaveDisplayName = string.Empty;
+            return;
+        }
+
         try
         {
             MazeSaveData saveData = _mazeSerializer.CreateSaveData(
@@ -1289,7 +1310,8 @@ public partial class Main : Node
                 ResolveStartCell(_currentMaze),
                 ResolveGoalCell(_currentMaze),
                 GetTrapDefinitionsForSave(),
-                _sessionState.MonsterSpawnCells);
+                _sessionState.MonsterSpawnCells,
+                MazeSaveKind.OfflineSave);
 
             _saveGameService.SaveMaze(saveData);
             RefreshSaveSlots();
@@ -1428,7 +1450,8 @@ public partial class Main : Node
             startCell,
             goalCell,
             GetTrapDefinitionsForSave(),
-            _sessionState.MonsterSpawnCells);
+            _sessionState.MonsterSpawnCells,
+            MazeSaveKind.HostSessionSnapshot);
 
         IReadOnlyList<PlayerIdentity> playerIdentities = BuildSessionPlayerIdentities(_currentMaze);
         CachePlayerIdentities(playerIdentities, clearMissing: true);
@@ -1874,7 +1897,7 @@ public partial class Main : Node
         return orderedIdentities;
     }
 
-    private bool CanRunLocalWorldAction(string actionName)
+    private bool CanRunWorldStartAction(string actionName)
     {
         if (_sessionState.SessionRole != SessionRole.Client && _sessionState.ConnectionStatus is not ConnectionStatus.Connecting)
         {
@@ -1894,6 +1917,32 @@ public partial class Main : Node
             _sessionState.LocalPeerId);
         return false;
     }
+
+    private bool CanManageLocalSaveLibrary(string actionName)
+    {
+        if (_sessionState.SessionRole == SessionRole.Offline
+            && _sessionState.ConnectionStatus is not ConnectionStatus.Connecting)
+        {
+            return true;
+        }
+
+        string message = _sessionState.ConnectionStatus == ConnectionStatus.Connecting
+            ? $"{actionName} ist waehrend des Verbindungsaufbaus gesperrt."
+            : $"{actionName} ist nur im Offline-Menue verfuegbar, damit Save-Bibliothek und Multiplayer-Lobby getrennt bleiben.";
+
+        GD.PrintErr($"[Main] {message}");
+        _mainMenu.SetSessionState(
+            _sessionState.SessionRole,
+            _sessionState.ConnectionStatus,
+            message,
+            _sessionState.ConnectedPeerIds,
+            _sessionState.LocalPeerId);
+        return false;
+    }
+
+    private bool CanPersistOfflineSave() =>
+        _sessionState.SessionRole == SessionRole.Offline
+        && _sessionState.ConnectionStatus is not ConnectionStatus.Connecting;
 
     private Cell ResolveStartCell(global::Maze.Model.Maze maze) =>
         ResolveSessionPoint(maze, _sessionState.StartCell, 0, 0);

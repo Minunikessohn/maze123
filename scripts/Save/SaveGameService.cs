@@ -37,11 +37,17 @@ public sealed class SaveGameService
             throw new ArgumentNullException(nameof(saveData));
         }
 
+        if (saveData.SaveKind != MazeSaveKind.OfflineSave)
+        {
+            throw new InvalidOperationException("Nur Offline-Saves duerfen lokal persistiert werden.");
+        }
+
         saveData.Config = saveData.Config.Clone().Sanitize();
         saveData.DisplayName = string.IsNullOrWhiteSpace(saveData.DisplayName) ? "maze-save" : saveData.DisplayName.Trim();
         saveData.SaveId = string.IsNullOrWhiteSpace(saveData.SaveId)
             ? GenerateUniqueSaveId(saveData.DisplayName)
             : SanitizeSaveId(saveData.SaveId);
+        saveData.SourceSessionId = string.Empty;
 
         if (saveData.CreatedAtUtc == default)
         {
@@ -70,6 +76,8 @@ public sealed class SaveGameService
 
         saveData.SaveId = SanitizeSaveId(string.IsNullOrWhiteSpace(saveData.SaveId) ? saveId : saveData.SaveId);
         saveData.DisplayName = string.IsNullOrWhiteSpace(saveData.DisplayName) ? saveData.SaveId : saveData.DisplayName.Trim();
+        saveData.SaveKind = MazeSaveKind.OfflineSave;
+        saveData.SourceSessionId = string.Empty;
         saveData.Config = saveData.Config.Clone().Sanitize();
         return saveData;
     }
@@ -104,6 +112,8 @@ public sealed class SaveGameService
                 string fallbackId = Path.GetFileNameWithoutExtension(filePath);
                 saveData.SaveId = SanitizeSaveId(string.IsNullOrWhiteSpace(saveData.SaveId) ? fallbackId : saveData.SaveId);
                 saveData.DisplayName = string.IsNullOrWhiteSpace(saveData.DisplayName) ? saveData.SaveId : saveData.DisplayName.Trim();
+                saveData.SaveKind = MazeSaveKind.OfflineSave;
+                saveData.SourceSessionId = string.Empty;
                 saveData.Config = saveData.Config.Clone().Sanitize();
                 saves.Add(_serializer.CreateSummary(saveData));
             }
