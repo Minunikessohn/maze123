@@ -7,6 +7,12 @@ using Maze.Model;
 
 namespace Maze.Gameplay.Monster;
 
+public readonly record struct MonsterPlayerTarget(
+    long PeerId,
+    Vector2I Cell,
+    Vector3 WorldPosition,
+    float WalkSpeedCellsPerSecond);
+
 public partial class MonsterController : Node3D
 {
     private const string DefaultImportedModelScenePath = "res://assets/monsters/Slenderman Model 3.fbx";
@@ -47,11 +53,10 @@ public partial class MonsterController : Node3D
     [Export] public float RevealDistanceCells { get; set; } = 2.2f;
     [Export] public string ImportedModelScenePath { get; set; } = DefaultImportedModelScenePath;
 
+    private readonly List<MonsterPlayerTarget> _playerTargets = new();
     private global::Maze.Model.Maze? _maze;
-    private Vector2I? _playerCell;
-    private Vector3? _playerWorldPosition;
     private float _cellSize = 1f;
-    private float _playerWalkSpeedCellsPerSecond = DefaultPlayerWalkSpeedCellsPerSecond;
+    private float _trackedPlayerWalkSpeedCellsPerSecond = DefaultPlayerWalkSpeedCellsPerSecond;
     private float _hoverTime;
     private Vector3 _basePosition;
     private Vector3 _moveStartPosition;
@@ -74,6 +79,9 @@ public partial class MonsterController : Node3D
     private bool _hasImportedVisuals;
     private OmniLight3D? _glowLight;
     private float _playerSpottedScreechCooldownRemaining;
+    private long? _trackedPlayerPeerId;
+    private Vector2I? _trackedPlayerCell;
+    private Vector3? _trackedPlayerWorldPosition;
 
     public Vector2I SpawnCell { get; private set; }
     public Vector2I CurrentCell { get; private set; }
@@ -82,8 +90,8 @@ public partial class MonsterController : Node3D
     public Vector2I? LastSeenPlayerCell { get; private set; }
     public MonsterState CurrentState { get; private set; } = MonsterState.Idle;
     public event Action<MonsterController, Vector2I>? CellChanged;
-    public event Action<MonsterController>? PlayerSpotted;
-    public event Action<MonsterController>? PlayerCaught;
+    public event Action<MonsterController, long>? PlayerSpotted;
+    public event Action<MonsterController, long>? PlayerCaught;
 
     public Vector3 StunAnchorGlobalPosition => GlobalPosition;
 
@@ -181,18 +189,26 @@ public partial class MonsterController : Node3D
         _stunElapsed = 0f;
         _playerSpottedScreechCooldownRemaining = 0f;
         _previousCell = null;
+        _playerTargets.Clear();
+        _trackedPlayerPeerId = null;
+        _trackedPlayerCell = null;
+        _trackedPlayerWorldPosition = null;
+        _trackedPlayerWalkSpeedCellsPerSecond = DefaultPlayerWalkSpeedCellsPerSecond;
         CanSeePlayerNow = false;
         LastSeenPlayerCell = null;
-        _playerWorldPosition = null;
         ApplyVisualScale();
         _basePosition = CellToWorld(spawnCell);
         Position = _basePosition;
         SetCurrentState(MonsterState.Idle);
     }
 
-    public void SetPlayerCell(Vector2I? playerCell)
+    public void SetPlayerTargets(IEnumerable<MonsterPlayerTarget> playerTargets)
     {
-        _playerCell = playerCell;
+        _playerTargets.Clear();
+        foreach (MonsterPlayerTarget playerTarget in playerTargets)
+        {
+            _playerTargets.Add(playerTarget);
+        }
 
         if (CurrentState == MonsterState.Stunned || _simulationPaused)
         {
@@ -200,11 +216,6 @@ public partial class MonsterController : Node3D
         }
 
         UpdatePlayerVisibility();
-    }
-
-    public void SetPlayerWorldPosition(Vector3? playerWorldPosition)
-    {
-        _playerWorldPosition = playerWorldPosition;
     }
 
     public void ActivateMonster()
@@ -241,11 +252,6 @@ public partial class MonsterController : Node3D
     {
         _simulationPaused = paused;
         SetProcess(_isActive && !paused);
-    }
-
-    public void SetPlayerWalkSpeed(float playerWalkSpeedCellsPerSecond)
-    {
-        _playerWalkSpeedCellsPerSecond = Mathf.Max(0.1f, playerWalkSpeedCellsPerSecond);
     }
 
     public bool TryStun(float durationSeconds = -1f)
@@ -306,15 +312,17 @@ public partial class MonsterController : Node3D
 
     private bool UpdateInCellChase(float delta)
     {
-        if (_playerCell is not Vector2I playerCell
-            || _playerWorldPosition is not Vector3 playerWorldPosition
-            || playerCell != CurrentCell)
+        if (!CanSeePlayerNow
+            || _trackedPlayerPeerId is not long trackedPlayerPeerId
+            || _trackedPlayerCell is not Vector2I trackedPlayerCell
+            || _trackedPlayerWorldPosition is not Vector3 trackedPlayerWorldPosition
+            || trackedPlayerCell != CurrentCell)
         {
             return false;
         }
 
         _isMoving = false;
-        Vector3 targetPosition = playerWorldPosition;
+        Vector3 targetPosition = trackedPlayerWorldPosition;
         targetPosition.Y = StandHeight;
         Vector3 toTarget = targetPosition - _basePosition;
         float distanceToTarget = toTarget.Length();
@@ -336,7 +344,7 @@ public partial class MonsterController : Node3D
 
         if ((_basePosition - targetPosition).Length() <= Mathf.Max(0.05f, _cellSize * CatchDistanceFactor))
         {
-            PlayerCaught?.Invoke(this);
+            PlayerCaught?.Invoke(this, trackedPlayerPeerId);
         }
 
         return true;
@@ -367,7 +375,7 @@ public partial class MonsterController : Node3D
         }
 
         Cell currentCell = _maze.GetCell(CurrentCell.X, CurrentCell.Y);
-        if (CanSeePlayerNow && _playerCell is Vector2I playerCell && AdvanceAlongPath(playerCell, MonsterState.Chase))
+        if (CanSeePlayerNow && _trackedPlayerCell is Vector2I trackedPlayerCell && AdvanceAlongPath(trackedPlayerCell, MonsterState.Chase))
         {
             return;
         }
@@ -415,9 +423,9 @@ public partial class MonsterController : Node3D
 
     private float GetEffectiveMoveSpeedCellsPerSecond()
     {
-        if (_playerWalkSpeedCellsPerSecond > 0.1f)
+        if (_trackedPlayerWalkSpeedCellsPerSecond > 0.1f)
         {
-            return Mathf.Max(0.1f, _playerWalkSpeedCellsPerSecond * Mathf.Max(0.01f, PlayerWalkSpeedFactor));
+            return Mathf.Max(0.1f, _trackedPlayerWalkSpeedCellsPerSecond * Mathf.Max(0.01f, PlayerWalkSpeedFactor));
         }
 
         return Mathf.Max(0.1f, MoveSpeedCellsPerSecond);
@@ -467,40 +475,81 @@ public partial class MonsterController : Node3D
 
     private void UpdatePlayerVisibility()
     {
-        if (_playerCell is not Vector2I playerCell || _maze is null)
+        if (_maze is null || _playerTargets.Count == 0)
         {
             CanSeePlayerNow = false;
             _chaseMemoryRemaining = 0f;
             LastSeenPlayerCell = null;
             _searchElapsed = 0f;
+            _trackedPlayerPeerId = null;
+            _trackedPlayerCell = null;
+            _trackedPlayerWorldPosition = null;
+            _trackedPlayerWalkSpeedCellsPerSecond = DefaultPlayerWalkSpeedCellsPerSecond;
             RefreshVisibility();
             return;
         }
 
         bool couldSeePlayerBefore = CanSeePlayerNow;
-        CanSeePlayerNow = CanSeePlayer(CurrentCell, playerCell, MaxSightRangeCells);
-        if (!CanSeePlayerNow)
+        long? previousTrackedPeerId = _trackedPlayerPeerId;
+        MonsterPlayerTarget? visibleTarget = SelectNearestVisibleTarget(MaxSightRangeCells);
+        if (visibleTarget is null)
         {
+            CanSeePlayerNow = false;
             RefreshVisibility();
             return;
         }
 
-        if (!couldSeePlayerBefore && _playerSpottedScreechCooldownRemaining <= 0f)
+        MonsterPlayerTarget playerTarget = visibleTarget.Value;
+        CanSeePlayerNow = true;
+        _trackedPlayerPeerId = playerTarget.PeerId;
+        _trackedPlayerCell = playerTarget.Cell;
+        _trackedPlayerWorldPosition = playerTarget.WorldPosition;
+        _trackedPlayerWalkSpeedCellsPerSecond = Mathf.Max(0.1f, playerTarget.WalkSpeedCellsPerSecond);
+        bool targetChanged = previousTrackedPeerId != playerTarget.PeerId;
+
+        if ((!couldSeePlayerBefore || targetChanged) && _playerSpottedScreechCooldownRemaining <= 0f)
         {
             _playerSpottedScreechCooldownRemaining = PlayerSpottedScreechCooldownSeconds;
-            PlayerSpotted?.Invoke(this);
+            PlayerSpotted?.Invoke(this, playerTarget.PeerId);
         }
 
-        LastSeenPlayerCell = playerCell;
+        LastSeenPlayerCell = playerTarget.Cell;
         _chaseMemoryRemaining = Mathf.Max(0f, ChaseMemoryDurationSeconds);
         _searchElapsed = SearchDurationSeconds;
         _hasBeenRevealed = true;
         if (!_isMoving)
         {
-            FaceMovementDirection(CellToWorld(playerCell) - _basePosition);
+            FaceMovementDirection(CellToWorld(playerTarget.Cell) - _basePosition);
         }
 
         RefreshVisibility();
+    }
+
+    private MonsterPlayerTarget? SelectNearestVisibleTarget(int maxSightRangeCells)
+    {
+        MonsterPlayerTarget? visibleTarget = null;
+        int bestDistanceSquared = int.MaxValue;
+
+        foreach (MonsterPlayerTarget playerTarget in _playerTargets)
+        {
+            if (!CanSeePlayer(CurrentCell, playerTarget.Cell, maxSightRangeCells))
+            {
+                continue;
+            }
+
+            int deltaX = CurrentCell.X - playerTarget.Cell.X;
+            int deltaY = CurrentCell.Y - playerTarget.Cell.Y;
+            int distanceSquared = deltaX * deltaX + deltaY * deltaY;
+            if (distanceSquared >= bestDistanceSquared)
+            {
+                continue;
+            }
+
+            bestDistanceSquared = distanceSquared;
+            visibleTarget = playerTarget;
+        }
+
+        return visibleTarget;
     }
 
     private void RefreshVisibility()
@@ -531,18 +580,21 @@ public partial class MonsterController : Node3D
             return true;
         }
 
-        if (_playerCell is not Vector2I playerCell)
+        foreach (MonsterPlayerTarget playerTarget in _playerTargets)
         {
-            return false;
+            if (_maze is not null && CanSeePlayer(CurrentCell, playerTarget.Cell, VisibleSightRangeCells))
+            {
+                return true;
+            }
+
+            Vector2 cellOffset = new(CurrentCell.X - playerTarget.Cell.X, CurrentCell.Y - playerTarget.Cell.Y);
+            if (cellOffset.Length() <= Mathf.Max(0.1f, RevealDistanceCells))
+            {
+                return true;
+            }
         }
 
-        if (_maze is not null && CanSeePlayer(CurrentCell, playerCell, VisibleSightRangeCells))
-        {
-            return true;
-        }
-
-        Vector2 cellOffset = new(CurrentCell.X - playerCell.X, CurrentCell.Y - playerCell.Y);
-        return cellOffset.Length() <= Mathf.Max(0.1f, RevealDistanceCells);
+        return false;
     }
 
     private void UpdateBehaviorState(float delta)

@@ -132,6 +132,19 @@ public sealed class GameSessionState
         PlayerStates.Remove(effectivePeerId);
     }
 
+    public IEnumerable<KeyValuePair<long, PlayerRuntimeState>> EnumerateMonsterTargetStates()
+    {
+        foreach ((long peerId, PlayerRuntimeState state) in PlayerStates)
+        {
+            if (!state.IsAlive || !state.IsManualMode)
+            {
+                continue;
+            }
+
+            yield return new KeyValuePair<long, PlayerRuntimeState>(peerId, state);
+        }
+    }
+
     private static PlayerRuntimeState ClonePlayerState(PlayerRuntimeState source)
     {
         return new PlayerRuntimeState

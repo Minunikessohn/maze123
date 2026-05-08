@@ -163,7 +163,6 @@ public partial class Main : Node
         _player.CellVisited += OnPlayerCellVisited;
         _player.StaminaChanged += OnPlayerStaminaChanged;
         _audioController.BindPlayer(_player);
-        _monsterManager.SetPlayerWalkSpeed(_player.ManualMoveSpeed);
 
         _runner.GenerationStepProduced += OnGenerationStepProduced;
         _runner.GenerationFinished += OnGenerationFinished;
@@ -193,7 +192,7 @@ public partial class Main : Node
             return;
         }
 
-        _monsterManager.UpdatePlayerWorldPosition(_player.Visible ? _player.GlobalPosition : null);
+        SyncMonsterPlayerTargets();
 
         SyncDayNightState();
         SyncTrapState();
@@ -248,14 +247,17 @@ public partial class Main : Node
         GD.Print("[Main] _ExitTree.");
     }
 
-    private void OnMonsterPlayerSpotted(MonsterController monster)
+    private void OnMonsterPlayerSpotted(MonsterController monster, long peerId)
     {
-        _audioController.PlayMonsterScreech();
+        if (peerId == LocalSessionPlayerId)
+        {
+            _audioController.PlayMonsterScreech();
+        }
     }
 
-    private void OnMonsterPlayerCaught(MonsterController monster)
+    private void OnMonsterPlayerCaught(MonsterController monster, long peerId)
     {
-        if (!_isManualMode || _currentMaze is null || !_player.Visible)
+        if (peerId != LocalSessionPlayerId || !_isManualMode || _currentMaze is null || !_player.Visible)
         {
             return;
         }
@@ -276,7 +278,6 @@ public partial class Main : Node
             state.GoalReached = false;
             state.IsAlive = true;
         });
-        _monsterManager.UpdatePlayerWorldPosition(_player.GlobalPosition);
     }
 
     private void OnGenerateRequested(int width, int height, string generatorId)
@@ -317,7 +318,7 @@ public partial class Main : Node
         _view3D.ClearRemotePlayerAvatars();
         _view3D.ClearTrail();
         _view3D.ClearProximityEffects();
-        _monsterManager.UpdatePlayerCell(null);
+        SyncMonsterPlayerTargets();
         ResetExploreMode();
         ClearPlayerCameraModes();
         _currentMaze = new global::Maze.Model.Maze(sanitizedConfig.Width, sanitizedConfig.Height);
@@ -488,7 +489,7 @@ public partial class Main : Node
         _solverPath.Clear();
         _player.Hide();
         _view3D.ClearTrail();
-        _monsterManager.UpdatePlayerCell(null);
+        SyncMonsterPlayerTargets();
         SetMapOverlayVisible(false);
         ResetExploreMode();
         ClearPlayerCameraModes();
@@ -632,7 +633,7 @@ public partial class Main : Node
         _view3D.ClearTrail();
         _view3D.ClearProximityEffects();
         ClearTrapRuntimeState(clearDefinitions: true);
-        _monsterManager.UpdatePlayerCell(null);
+        SyncMonsterPlayerTargets();
         SetMapOverlayVisible(false);
         ResetExploreMode();
         ClearPlayerCameraModes();
@@ -688,6 +689,7 @@ public partial class Main : Node
         _playerIdentities.Remove(peerId);
         _view3D.RemoveRemotePlayerAvatar(peerId);
         SyncMultiplayerSessionState();
+        SyncMonsterPlayerTargets();
         _mainMenu.SetSessionState(
             _sessionState.SessionRole,
             _sessionState.ConnectionStatus,
@@ -735,6 +737,7 @@ public partial class Main : Node
         CachePlayerIdentity(playerSnapshot.Identity);
         _sessionState.SetPlayerState(peerId, playerSnapshot.RuntimeState);
         ApplyRemotePlayerSnapshot(playerSnapshot);
+        SyncMonsterPlayerTargets();
     }
 
     private void OnPlayerSnapshotBatchReceived(PlayerSnapshotBatch snapshotBatch)
@@ -764,7 +767,7 @@ public partial class Main : Node
         _player.Hide();
         _view3D.ClearTrail();
         _view3D.ClearProximityEffects();
-        _monsterManager.UpdatePlayerCell(null);
+        SyncMonsterPlayerTargets();
         SetMapOverlayVisible(false);
         ResetExploreMode();
         ClearPlayerCameraModes();
@@ -944,7 +947,6 @@ public partial class Main : Node
         });
         _audioController.UpdatePlayerCell(playerCell);
         _trapManager.NotifyPlayerEnteredCell(playerCell);
-        _monsterManager.UpdatePlayerCell(playerCell);
         _view3D.MarkTrailCell(x, y);
         _view3D.UpdateMonsterProximity(playerCell);
         _mapOverlay.MarkVisited(playerCell);
@@ -1060,7 +1062,6 @@ public partial class Main : Node
         });
         _audioController.UpdatePlayerCell(null);
         _view3D.ClearProximityEffects();
-        _monsterManager.UpdatePlayerCell(null);
         _mapOverlay.SetPlayerCell(null);
         SetMapOverlayVisible(false);
 
@@ -1547,6 +1548,7 @@ public partial class Main : Node
         }
 
         PruneRemotePlayerAvatars(activePeerIds);
+        SyncMonsterPlayerTargets();
     }
 
     private void ApplyRemotePlayerSnapshot(PlayerSnapshot playerSnapshot)
@@ -1579,6 +1581,7 @@ public partial class Main : Node
     {
         PlayerRuntimeState state = _sessionState.GetOrCreatePlayerState(peerId);
         update(state);
+        SyncMonsterPlayerTargets();
     }
 
     private static PlayerRuntimeState ClonePlayerRuntimeState(PlayerRuntimeState state)
@@ -1619,6 +1622,37 @@ public partial class Main : Node
             _playerIdentities.Clear();
             ResetNetworkSnapshotTimers();
         }
+
+        SyncMonsterPlayerTargets();
+    }
+
+    private void SyncMonsterPlayerTargets()
+    {
+        if (_currentMaze is null)
+        {
+            _monsterManager.UpdatePlayers(Array.Empty<MonsterPlayerTarget>());
+            return;
+        }
+
+        List<MonsterPlayerTarget> playerTargets = new();
+        foreach (KeyValuePair<long, PlayerRuntimeState> entry in _sessionState.EnumerateMonsterTargetStates())
+        {
+            long peerId = entry.Key;
+            PlayerRuntimeState runtimeState = entry.Value;
+            Vector3 worldPosition = runtimeState.GetWorldPosition();
+            if (peerId == LocalSessionPlayerId && _player.Visible && _player.IsManualModeActive)
+            {
+                worldPosition = _player.GlobalPosition;
+            }
+
+            playerTargets.Add(new MonsterPlayerTarget(
+                peerId,
+                runtimeState.CurrentCell.ToVector2I(),
+                worldPosition,
+                _player.ManualMoveSpeed));
+        }
+
+        _monsterManager.UpdatePlayers(playerTargets);
     }
 
     private void CachePlayerIdentities(IEnumerable<PlayerIdentity> playerIdentities, bool clearMissing)
@@ -1829,8 +1863,7 @@ public partial class Main : Node
             _player.DisableManualMode();
             _audioController.UpdatePlayerCell(null);
             _view3D.ClearProximityEffects();
-            _monsterManager.UpdatePlayerCell(null);
-            _monsterManager.UpdatePlayerWorldPosition(null);
+            SyncMonsterPlayerTargets();
             _mapOverlay.SetPlayerCell(null);
             return;
         }
@@ -1844,8 +1877,7 @@ public partial class Main : Node
         Vector2I playerCell = runtimeState.CurrentCell.ToVector2I();
         _audioController.UpdatePlayerCell(playerCell);
         _audioController.SetPlayerStamina(runtimeState.CurrentStamina, runtimeState.MaximumStamina, runtimeState.IsSprinting);
-        _monsterManager.UpdatePlayerCell(playerCell);
-        _monsterManager.UpdatePlayerWorldPosition(runtimeState.GetWorldPosition());
+        SyncMonsterPlayerTargets();
         _view3D.UpdateMonsterProximity(playerCell);
         _mapOverlay.MarkVisited(playerCell);
         _mapOverlay.SetPlayerCell(playerCell);
@@ -2128,7 +2160,7 @@ public partial class Main : Node
 
         float collisionRadius = _view3D.CellSize * MonsterStunCollisionRadiusFactor;
 
-        if (_isManualMode && _monsterManager.TryCatchPlayerInRadius(_player.GlobalPosition, collisionRadius))
+        if (_isManualMode && _monsterManager.TryCatchPlayerInRadius(LocalSessionPlayerId, _player.GlobalPosition, collisionRadius))
         {
             _monsterManager.UpdateStunCollision(Vector3.Zero, 0f);
             return;

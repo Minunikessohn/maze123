@@ -24,6 +24,7 @@ public partial class MonsterManager : Node3D
     private readonly List<Vector2I> _spawnCells = new();
     private readonly List<Vector2I> _activeMonsterCells = new();
     private readonly List<MonsterController> _activeMonsters = new();
+    private readonly List<MonsterPlayerTarget> _playerTargets = new();
     private readonly Dictionary<MonsterController, int> _monsterIndices = new();
     private readonly HashSet<MonsterController> _stunOverlapMonsters = new();
 
@@ -32,14 +33,12 @@ public partial class MonsterManager : Node3D
     private TrapManager? _trapManager;
     private MazeGameConfig? _config;
     private global::Maze.Model.Maze? _maze;
-    private Vector2I? _playerCell;
     private float _cellSize = 1f;
-    private float _playerWalkSpeedCellsPerSecond = 2.2f;
     private bool _requiresSpawn = true;
 
     public IReadOnlyList<Vector2I> ActiveMonsterCells => _activeMonsterCells;
-    public event Action<MonsterController>? PlayerSpotted;
-    public event Action<MonsterController>? PlayerCaught;
+    public event Action<MonsterController, long>? PlayerSpotted;
+    public event Action<MonsterController, long>? PlayerCaught;
 
     public override void _Ready()
     {
@@ -122,31 +121,17 @@ public partial class MonsterManager : Node3D
         }
     }
 
-    public void UpdatePlayerCell(Vector2I? playerCell)
+    public void UpdatePlayers(IEnumerable<MonsterPlayerTarget> playerTargets)
     {
-        _playerCell = playerCell;
-
-        foreach (MonsterController monster in _activeMonsters)
+        _playerTargets.Clear();
+        foreach (MonsterPlayerTarget playerTarget in playerTargets)
         {
-            monster.SetPlayerCell(playerCell);
+            _playerTargets.Add(playerTarget);
         }
-    }
-
-    public void UpdatePlayerWorldPosition(Vector3? playerWorldPosition)
-    {
-        foreach (MonsterController monster in _activeMonsters)
-        {
-            monster.SetPlayerWorldPosition(playerWorldPosition);
-        }
-    }
-
-    public void SetPlayerWalkSpeed(float playerWalkSpeedCellsPerSecond)
-    {
-        _playerWalkSpeedCellsPerSecond = Mathf.Max(0.1f, playerWalkSpeedCellsPerSecond);
 
         foreach (MonsterController monster in _activeMonsters)
         {
-            monster.SetPlayerWalkSpeed(_playerWalkSpeedCellsPerSecond);
+            monster.SetPlayerTargets(_playerTargets);
         }
     }
 
@@ -182,7 +167,7 @@ public partial class MonsterManager : Node3D
         return true;
     }
 
-    public bool TryCatchPlayerInRadius(Vector3 worldPosition, float radius)
+    public bool TryCatchPlayerInRadius(long peerId, Vector3 worldPosition, float radius)
     {
         if (radius <= 0f)
         {
@@ -215,7 +200,7 @@ public partial class MonsterManager : Node3D
             return false;
         }
 
-        PlayerCaught?.Invoke(closestMonster);
+        PlayerCaught?.Invoke(closestMonster, peerId);
         return true;
     }
 
@@ -315,8 +300,7 @@ public partial class MonsterManager : Node3D
             monster.PlayerSpotted += OnMonsterPlayerSpotted;
             monster.PlayerCaught += OnMonsterPlayerCaught;
             monster.Configure(_maze!, spawnCell, _cellSize, _config?.MonsterCanBeStunned ?? false);
-            monster.SetPlayerWalkSpeed(_playerWalkSpeedCellsPerSecond);
-            monster.SetPlayerCell(_playerCell);
+            monster.SetPlayerTargets(_playerTargets);
             _monsterIndices[monster] = _activeMonsterCells.Count;
             _activeMonsterCells.Add(monster.CurrentCell);
             monster.ActivateMonster();
@@ -403,13 +387,13 @@ public partial class MonsterManager : Node3D
         }
     }
 
-    private void OnMonsterPlayerSpotted(MonsterController monster)
+    private void OnMonsterPlayerSpotted(MonsterController monster, long peerId)
     {
-        PlayerSpotted?.Invoke(monster);
+        PlayerSpotted?.Invoke(monster, peerId);
     }
 
-    private void OnMonsterPlayerCaught(MonsterController monster)
+    private void OnMonsterPlayerCaught(MonsterController monster, long peerId)
     {
-        PlayerCaught?.Invoke(monster);
+        PlayerCaught?.Invoke(monster, peerId);
     }
 }
