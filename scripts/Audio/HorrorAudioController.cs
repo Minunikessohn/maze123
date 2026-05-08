@@ -26,6 +26,9 @@ public partial class HorrorAudioController : Node
 	private const float HeartbeatMaxIntervalSeconds = 1.2f;
 	private const float ExhaustionMinIntervalSeconds = 0.9f;
 	private const float ExhaustionMaxIntervalSeconds = 2.1f;
+	private const float TrapTriggerAudibleDistanceCells = 4.5f;
+	private const float TrapTriggerCooldownSeconds = 0.7f;
+	private const float MatchCueCooldownSeconds = 0.8f;
 
 	private static readonly string[] FootstepFiles =
 	{
@@ -68,6 +71,8 @@ public partial class HorrorAudioController : Node
 	private float _monsterCueCooldownRemaining;
 	private float _heartbeatCooldownRemaining;
 	private float _exhaustionCooldownRemaining;
+	private float _trapTriggerCooldownRemaining;
+	private float _matchCueCooldownRemaining;
 
 	public override void _Ready()
 	{
@@ -104,10 +109,17 @@ public partial class HorrorAudioController : Node
 		}
 
 		float deltaSeconds = (float)delta;
+		_tickCooldowns(deltaSeconds);
 		UpdateFootsteps(deltaSeconds);
 		UpdateMonsterCue(deltaSeconds);
 		UpdateHeartbeat(deltaSeconds);
 		UpdateExhaustion(deltaSeconds);
+	}
+
+	private void _tickCooldowns(float deltaSeconds)
+	{
+		_trapTriggerCooldownRemaining = Mathf.Max(0f, _trapTriggerCooldownRemaining - deltaSeconds);
+		_matchCueCooldownRemaining = Mathf.Max(0f, _matchCueCooldownRemaining - deltaSeconds);
 	}
 
 	public void BindPlayer(PlayerCharacter3D player)
@@ -126,11 +138,22 @@ public partial class HorrorAudioController : Node
 
 	public void SetGameplayState(bool gameplayActive, bool manualModeActive)
 	{
+		bool wasGameplayActive = _gameplayActive;
 		_gameplayActive = gameplayActive;
 		_manualModeActive = manualModeActive;
 
+		if (!wasGameplayActive && _gameplayActive)
+		{
+			NotifyMatchStarted();
+		}
+
 		if (!_gameplayActive)
 		{
+			if (wasGameplayActive)
+			{
+				NotifyMatchEnded();
+			}
+
 			StopAll();
 		}
 	}
@@ -181,6 +204,69 @@ public partial class HorrorAudioController : Node
 		_monsterBitePlayer.PitchScale = _random.RandfRange(0.97f, 1.02f);
 		_monsterBitePlayer.VolumeDb = ToDecibels(_settings.MasterVolume * _settings.MonsterVolume * 0.98f);
 		_monsterBitePlayer.Play();
+	}
+
+	public void NotifyLocalPlayerSpotted()
+	{
+		if (!_gameplayActive || _settings.MasterVolume <= 0f || _settings.MonsterVolume <= 0f)
+		{
+			return;
+		}
+
+		PlayMonsterScreech();
+		_monsterCueCooldownRemaining = Mathf.Max(_monsterCueCooldownRemaining, MonsterCueMinIntervalSeconds * 0.35f);
+		_heartbeatCooldownRemaining = 0f;
+	}
+
+	public void NotifyLocalPlayerCaught()
+	{
+		if (!_gameplayActive || _settings.MasterVolume <= 0f || _settings.MonsterVolume <= 0f)
+		{
+			return;
+		}
+
+		PlayMonsterBite();
+		_heartbeatCooldownRemaining = 0f;
+		_exhaustionCooldownRemaining = 0f;
+	}
+
+	public void NotifyMatchStarted()
+	{
+		if (!_gameplayActive || _matchCueCooldownRemaining > 0f || _settings.MasterVolume <= 0f || _settings.MonsterVolume <= 0f)
+		{
+			return;
+		}
+
+		PlayMonsterCue(0.22f, 1.04f, 0.96f, 1.02f);
+		_matchCueCooldownRemaining = MatchCueCooldownSeconds;
+	}
+
+	public void NotifyMatchEnded()
+	{
+		_matchCueCooldownRemaining = 0f;
+		_trapTriggerCooldownRemaining = 0f;
+	}
+
+	public void NotifyTrapTriggeredNearLocalPlayer(Vector2I trapCell)
+	{
+		if (!_gameplayActive
+			|| _playerCell is not Vector2I playerCell
+			|| _trapTriggerCooldownRemaining > 0f
+			|| _settings.MasterVolume <= 0f
+			|| _settings.MonsterVolume <= 0f)
+		{
+			return;
+		}
+
+		float cellDistance = Mathf.Abs(trapCell.X - playerCell.X) + Mathf.Abs(trapCell.Y - playerCell.Y);
+		if (cellDistance > TrapTriggerAudibleDistanceCells)
+		{
+			return;
+		}
+
+		float proximity = 1f - cellDistance / TrapTriggerAudibleDistanceCells;
+		PlayMonsterCue(Mathf.Lerp(0.16f, 0.54f, proximity), Mathf.Lerp(1.12f, 0.92f, proximity), 0.94f, 1.08f);
+		_trapTriggerCooldownRemaining = TrapTriggerCooldownSeconds;
 	}
 
 	private AudioStreamPlayer CreatePlayer(string name)
@@ -240,10 +326,7 @@ public partial class HorrorAudioController : Node
 			return;
 		}
 
-		_monsterCuePlayer.Stream = PickRandom(_monsterCueStreams);
-		_monsterCuePlayer.PitchScale = _random.RandfRange(0.92f, 1.06f);
-		_monsterCuePlayer.VolumeDb = ToDecibels(_settings.MasterVolume * _settings.MonsterVolume * Mathf.Lerp(0.18f, 0.82f, monsterIntensity));
-		_monsterCuePlayer.Play();
+		PlayMonsterCue(Mathf.Lerp(0.18f, 0.82f, monsterIntensity), _random.RandfRange(0.92f, 1.06f));
 		_monsterCueCooldownRemaining = Mathf.Lerp(MonsterCueMaxIntervalSeconds, MonsterCueMinIntervalSeconds, monsterIntensity);
 	}
 
@@ -310,6 +393,8 @@ public partial class HorrorAudioController : Node
 		_monsterCueCooldownRemaining = 0f;
 		_heartbeatCooldownRemaining = 0f;
 		_exhaustionCooldownRemaining = 0f;
+		_trapTriggerCooldownRemaining = 0f;
+		_matchCueCooldownRemaining = 0f;
 		_footstepPlayer.Stop();
 		_monsterCuePlayer.Stop();
 		_monsterScreechPlayer.Stop();
@@ -362,6 +447,22 @@ public partial class HorrorAudioController : Node
 			: 0f;
 		float sprintBias = _isSprinting ? SprintMonsterCueBias : 0f;
 		return Mathf.Clamp(distanceFactor + dangerBoost + sprintBias, 0f, 1f);
+	}
+
+	private void PlayMonsterCue(float normalizedVolume, float pitchScale, float minPitchJitter = 1f, float maxPitchJitter = 1f)
+	{
+		if (_monsterCueStreams.Count == 0)
+		{
+			return;
+		}
+
+		_monsterCuePlayer.Stream = PickRandom(_monsterCueStreams);
+		float jitter = minPitchJitter == maxPitchJitter
+			? minPitchJitter
+			: _random.RandfRange(minPitchJitter, maxPitchJitter);
+		_monsterCuePlayer.PitchScale = pitchScale * jitter;
+		_monsterCuePlayer.VolumeDb = ToDecibels(_settings.MasterVolume * _settings.MonsterVolume * Mathf.Clamp(normalizedVolume, 0f, 1f));
+		_monsterCuePlayer.Play();
 	}
 
 	private AudioStream PickRandom(IReadOnlyList<AudioStream> streams)

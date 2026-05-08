@@ -94,6 +94,7 @@ public partial class Main : Node
     private double _clientSnapshotAccumulator;
     private double _hostSnapshotAccumulator;
     private string _pendingSaveDisplayName = string.Empty;
+    private readonly HashSet<Vector2I> _knownActiveTrapCells = new();
 
     private long LocalSessionPlayerId => _sessionState.EffectiveLocalPlayerId;
 
@@ -253,7 +254,7 @@ public partial class Main : Node
     {
         if (peerId == LocalSessionPlayerId)
         {
-            _audioController.PlayMonsterScreech();
+            _audioController.NotifyLocalPlayerSpotted();
         }
     }
 
@@ -266,7 +267,7 @@ public partial class Main : Node
 
         Cell startCell = ResolveStartCell(_currentMaze);
         Cell localSpawnCell = ResolveLocalSpawnCell(startCell);
-        _audioController.PlayMonsterBite();
+        _audioController.NotifyLocalPlayerCaught();
         _hud.SetLocalStatus("Monsterkontakt - zurueck zum Spawn.");
         _player.ResetManualPosition(localSpawnCell);
         _sessionState.GoalReached = false;
@@ -2168,6 +2169,35 @@ public partial class Main : Node
         _audioController.SetGameplayState(showGameplay && _view3D.Visible, gameplayInputEnabled && _isManualMode && _view3D.Visible);
     }
 
+    private void SyncKnownTrapCells(bool resetToCurrentState)
+    {
+        if (resetToCurrentState)
+        {
+            _knownActiveTrapCells.Clear();
+            foreach (Vector2I trapCell in _sessionState.ActiveTrapCells)
+            {
+                _knownActiveTrapCells.Add(trapCell);
+            }
+
+            return;
+        }
+
+        HashSet<Vector2I> currentActiveTrapCells = new(_sessionState.ActiveTrapCells);
+        foreach (Vector2I previousTrapCell in _knownActiveTrapCells)
+        {
+            if (!currentActiveTrapCells.Contains(previousTrapCell))
+            {
+                _audioController.NotifyTrapTriggeredNearLocalPlayer(previousTrapCell);
+            }
+        }
+
+        _knownActiveTrapCells.Clear();
+        foreach (Vector2I trapCell in currentActiveTrapCells)
+        {
+            _knownActiveTrapCells.Add(trapCell);
+        }
+    }
+
     private void ConfigureDayNightCycle(MazeGameConfig config)
     {
         _dayNightController.Configure(config.DayNightCycleEnabled, _sessionState.DayNightProgress);
@@ -2178,6 +2208,7 @@ public partial class Main : Node
     {
         _trapManager.SetAuthoritativeConsumptionEnabled(IsAuthoritativeWorldHost());
         _trapManager.Configure(_currentGameConfig, _currentMaze, _sessionState.TrapDefinitions, _view3D.CellSize);
+        SyncKnownTrapCells(resetToCurrentState: true);
         SyncTrapState();
     }
 
@@ -2185,6 +2216,7 @@ public partial class Main : Node
     {
         _trapManager.Clear();
         _sessionState.ActiveTrapCells.Clear();
+        _knownActiveTrapCells.Clear();
 
         if (clearDefinitions)
         {
@@ -2203,10 +2235,12 @@ public partial class Main : Node
         if (IsAuthoritativeWorldHost())
         {
             ApplyTrapCellsToSessionState(_trapManager.ActiveTrapCells);
+            SyncKnownTrapCells(resetToCurrentState: false);
             return;
         }
 
         _trapManager.ApplyActiveTrapCells(_sessionState.ActiveTrapCells);
+        SyncKnownTrapCells(resetToCurrentState: false);
     }
 
     private void ConfigureMonsterSystem() =>
