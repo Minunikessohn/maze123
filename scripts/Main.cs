@@ -161,7 +161,12 @@ public partial class Main : Node
         ApplyVisualSettings(_sessionState.VisualSettings);
         ApplyAudioSettings(_sessionState.AudioSettings);
         SyncMultiplayerSessionState();
-        _mainMenu.SetSessionState(_sessionState.SessionRole, _sessionState.ConnectionStatus, _sessionState.ConnectionMessage);
+        _mainMenu.SetSessionState(
+            _sessionState.SessionRole,
+            _sessionState.ConnectionStatus,
+            _sessionState.ConnectionMessage,
+            _sessionState.ConnectedPeerIds,
+            _sessionState.LocalPeerId);
         _view2D.SetCameraEnabled(_view2D.Visible);
         _mapOverlay.Visible = false;
         TransitionToState(GameFlowState.MainMenu);
@@ -625,7 +630,7 @@ public partial class Main : Node
     private void OnMultiplayerSessionStateChanged(SessionRole role, ConnectionStatus status, string message)
     {
         SyncMultiplayerSessionState();
-        _mainMenu.SetSessionState(role, status, message);
+        _mainMenu.SetSessionState(role, status, message, _sessionState.ConnectedPeerIds, _sessionState.LocalPeerId);
         GD.Print($"[Main] Session-Status: Rolle={role}, Status={status}, Nachricht='{message}'");
     }
 
@@ -1173,7 +1178,12 @@ public partial class Main : Node
             : $"{actionName} ist fuer Clients in Phase 1 noch nicht verfuegbar.";
 
         GD.PrintErr($"[Main] {message}");
-        _mainMenu.SetSessionState(_sessionState.SessionRole, _sessionState.ConnectionStatus, message);
+        _mainMenu.SetSessionState(
+            _sessionState.SessionRole,
+            _sessionState.ConnectionStatus,
+            message,
+            _sessionState.ConnectedPeerIds,
+            _sessionState.LocalPeerId);
         return false;
     }
 

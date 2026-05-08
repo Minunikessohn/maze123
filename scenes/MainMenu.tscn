@@ -75,6 +75,25 @@ toggle_mode = true
 text = "Join"
 toggle_mode = true
 
+[node name="SessionModeTitle" type="Label" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox"]
+text = "Offline-Lauf"
+theme_override_font_sizes/font_size = 16
+
+[node name="SessionModeDescription" type="Label" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox"]
+text = "Starte lokal ohne Netzwerk. Host- und Join-Lobby bleiben getrennte Wege mit eigener Statusanzeige."
+autowrap_mode = 3
+
+[node name="PlayerNameRow" type="HBoxContainer" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox"]
+theme_override_constants/separation = 10
+
+[node name="PlayerNameLabel" type="Label" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/PlayerNameRow"]
+text = "Name"
+custom_minimum_size = Vector2(90, 0)
+
+[node name="PlayerNameEdit" type="LineEdit" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/PlayerNameRow"]
+size_flags_horizontal = 3
+placeholder_text = "optional"
+
 [node name="SessionAddressRow" type="HBoxContainer" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox"]
 visible = false
 theme_override_constants/separation = 10
@@ -112,6 +131,31 @@ disabled = true
 [node name="SessionStatusLabel" type="Label" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox"]
 text = "Keine Sitzung aktiv."
 autowrap_mode = 3
+
+[node name="LobbyPanel" type="PanelContainer" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox"]
+
+[node name="Margin" type="MarginContainer" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/LobbyPanel"]
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="VBox" type="VBoxContainer" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/LobbyPanel/Margin"]
+theme_override_constants/separation = 8
+
+[node name="LobbyHintLabel" type="Label" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/LobbyPanel/Margin/VBox"]
+text = "Offline-Uebersicht"
+theme_override_font_sizes/font_size = 15
+
+[node name="SessionSummaryLabel" type="Label" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/LobbyPanel/Margin/VBox"]
+text = "Keine Lobby aktiv. Offline-Laeufe verwenden nur lokale Saves und lokale Weltstarts."
+autowrap_mode = 3
+
+[node name="LobbyPlayersList" type="ItemList" parent="Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/LobbyPanel/Margin/VBox"]
+custom_minimum_size = Vector2(0, 96)
+size_flags_vertical = 3
+select_mode = 0
+allow_reselect = true
 
 [node name="ModeButtons" type="HBoxContainer" parent="Center/Panel/Margin/VBox"]
 theme_override_constants/separation = 12

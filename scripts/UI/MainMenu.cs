@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 using Maze.Game;
 using Maze.Network;
@@ -35,12 +36,19 @@ public partial class MainMenu : Control
     private Button _hostSessionButton = null!;
     private Button _joinSessionButton = null!;
     private PanelContainer _panel = null!;
+    private Label _sessionModeTitleLabel = null!;
+    private Label _sessionModeDescriptionLabel = null!;
+    private Control _playerNameRow = null!;
+    private LineEdit _playerNameEdit = null!;
     private Label _modeTitleLabel = null!;
     private Label _modeDescriptionLabel = null!;
     private Control _sessionAddressRow = null!;
     private LineEdit _sessionAddressEdit = null!;
     private SpinBox _sessionPortSpinBox = null!;
     private Label _sessionStatusLabel = null!;
+    private Label _sessionSummaryLabel = null!;
+    private Label _lobbyHintLabel = null!;
+    private ItemList _lobbyPlayersList = null!;
     private NewMazePanel _newMazePanel = null!;
     private SaveListPanel _loadMazePanel = null!;
     private SaveListPanel _deleteMazePanel = null!;
@@ -50,6 +58,8 @@ public partial class MainMenu : Control
     private SessionMode _currentSessionMode = SessionMode.Offline;
     private SessionRole _sessionRole = SessionRole.Offline;
     private ConnectionStatus _connectionStatus = ConnectionStatus.Offline;
+    private readonly List<long> _connectedPeerIds = new();
+    private long _localPeerId;
 
     public event Action<string, MazeGameConfig>? StartNewMazeRequested;
     public event Action<string>? LoadMazeRequested;
@@ -67,12 +77,19 @@ public partial class MainMenu : Control
         _offlineSessionButton = GetNode<Button>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/SessionModeButtons/OfflineSessionButton");
         _hostSessionButton = GetNode<Button>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/SessionModeButtons/HostSessionButton");
         _joinSessionButton = GetNode<Button>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/SessionModeButtons/JoinSessionButton");
+        _sessionModeTitleLabel = GetNode<Label>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/SessionModeTitle");
+        _sessionModeDescriptionLabel = GetNode<Label>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/SessionModeDescription");
+        _playerNameRow = GetNode<Control>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/PlayerNameRow");
+        _playerNameEdit = GetNode<LineEdit>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/PlayerNameRow/PlayerNameEdit");
         _modeTitleLabel = GetNode<Label>("Center/Panel/Margin/VBox/ModeTitle");
         _modeDescriptionLabel = GetNode<Label>("Center/Panel/Margin/VBox/ModeDescription");
         _sessionAddressRow = GetNode<Control>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/SessionAddressRow");
         _sessionAddressEdit = GetNode<LineEdit>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/SessionAddressRow/SessionAddressEdit");
         _sessionPortSpinBox = GetNode<SpinBox>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/SessionPortRow/SessionPortSpinBox");
         _sessionStatusLabel = GetNode<Label>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/SessionStatusLabel");
+        _sessionSummaryLabel = GetNode<Label>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/LobbyPanel/Margin/VBox/SessionSummaryLabel");
+        _lobbyHintLabel = GetNode<Label>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/LobbyPanel/Margin/VBox/LobbyHintLabel");
+        _lobbyPlayersList = GetNode<ItemList>("Center/Panel/Margin/VBox/SessionPanel/Margin/VBox/LobbyPanel/Margin/VBox/LobbyPlayersList");
         _newMazePanel = GetNode<NewMazePanel>("Center/Panel/Margin/VBox/Content/NewMazePanel");
         _loadMazePanel = GetNode<SaveListPanel>("Center/Panel/Margin/VBox/Content/LoadMazePanel");
         _deleteMazePanel = GetNode<SaveListPanel>("Center/Panel/Margin/VBox/Content/DeleteMazePanel");
@@ -89,14 +106,23 @@ public partial class MainMenu : Control
         _sessionActionButton.Pressed += OnSessionActionPressed;
         _loadMazePanel.SelectionChanged += UpdateActionButtonState;
         _deleteMazePanel.SelectionChanged += UpdateActionButtonState;
-        _sessionAddressEdit.TextChanged += _ => UpdateSessionActionState();
-        _sessionPortSpinBox.ValueChanged += _ => UpdateSessionActionState();
+        _playerNameEdit.TextChanged += _ => UpdateLobbyState();
+        _sessionAddressEdit.TextChanged += _ =>
+        {
+            UpdateSessionActionState();
+            UpdateLobbyState();
+        };
+        _sessionPortSpinBox.ValueChanged += _ =>
+        {
+            UpdateSessionActionState();
+            UpdateLobbyState();
+        };
         GetViewport().SizeChanged += UpdateResponsiveLayout;
 
         UpdateResponsiveLayout();
         SetMode(MenuMode.NewMaze);
         SetSessionMode(SessionMode.Offline);
-        SetSessionState(SessionRole.Offline, ConnectionStatus.Offline, "Keine Sitzung aktiv.");
+        SetSessionState(SessionRole.Offline, ConnectionStatus.Offline, "Keine Sitzung aktiv.", Array.Empty<long>(), 0L);
     }
 
     public override void _ExitTree()
@@ -118,10 +144,13 @@ public partial class MainMenu : Control
         UpdateActionButtonState();
     }
 
-    public void SetSessionState(SessionRole role, ConnectionStatus status, string message)
+    public void SetSessionState(SessionRole role, ConnectionStatus status, string message, IEnumerable<long> connectedPeerIds, long localPeerId)
     {
         _sessionRole = role;
         _connectionStatus = status;
+        _localPeerId = localPeerId;
+        _connectedPeerIds.Clear();
+        _connectedPeerIds.AddRange(connectedPeerIds.Distinct().OrderBy(peerId => peerId));
         _sessionStatusLabel.Text = string.IsNullOrWhiteSpace(message) ? "Keine Sitzung aktiv." : message;
 
         if (role == SessionRole.Host)
@@ -133,6 +162,8 @@ public partial class MainMenu : Control
             _currentSessionMode = SessionMode.Join;
         }
 
+        UpdateSessionModePresentation();
+        UpdateLobbyState();
         UpdateSessionActionState();
         UpdateActionButtonState();
     }
@@ -148,25 +179,7 @@ public partial class MainMenu : Control
         _loadMazePanel.Visible = mode == MenuMode.LoadMaze;
         _deleteMazePanel.Visible = mode == MenuMode.DeleteMaze;
 
-        switch (mode)
-        {
-            case MenuMode.NewMaze:
-                _modeTitleLabel.Text = "Neues Labyrinth";
-                _modeDescriptionLabel.Text = "Konfiguriere Groesse, Darstellung und spaetere Gameplay-Regeln fuer einen neuen Lauf.";
-                _actionButton.Text = "Spiel starten";
-                break;
-            case MenuMode.LoadMaze:
-                _modeTitleLabel.Text = "Gespeicherte Labyrinthe";
-                _modeDescriptionLabel.Text = "Waehle einen vorhandenen Spielstand und setze das Labyrinth exakt mit gespeicherter Struktur fort.";
-                _actionButton.Text = "Laden";
-                break;
-            default:
-                _modeTitleLabel.Text = "Labyrinth loeschen";
-                _modeDescriptionLabel.Text = "Entferne einen gespeicherten Spielstand dauerhaft aus dem lokalen Save-Ordner.";
-                _actionButton.Text = "Loeschen";
-                break;
-        }
-
+        UpdateModePresentation();
         UpdateActionButtonState();
     }
 
@@ -178,20 +191,27 @@ public partial class MainMenu : Control
         }
 
         _currentSessionMode = mode;
+        UpdateSessionModePresentation();
+        UpdateLobbyState();
+        UpdateModePresentation();
         UpdateSessionActionState();
     }
 
     private void UpdateActionButtonState()
     {
-        bool clientOwnsSession = _sessionRole == SessionRole.Client || _connectionStatus is ConnectionStatus.Connecting or ConnectionStatus.Starting;
+        bool sessionBusy = _connectionStatus is ConnectionStatus.Connecting or ConnectionStatus.Starting;
+        bool clientOwnsSession = _sessionRole == SessionRole.Client || _connectionStatus == ConnectionStatus.Connected;
+        bool hostLobbyActive = _sessionRole == SessionRole.Host || _connectionStatus == ConnectionStatus.Hosting;
 
-        _actionButton.Disabled = clientOwnsSession || _currentMode switch
+        _actionButton.Disabled = _currentMode switch
         {
-            MenuMode.NewMaze => false,
-            MenuMode.LoadMaze => string.IsNullOrWhiteSpace(_loadMazePanel.SelectedSaveId),
-            MenuMode.DeleteMaze => string.IsNullOrWhiteSpace(_deleteMazePanel.SelectedSaveId),
+            MenuMode.NewMaze => clientOwnsSession || sessionBusy,
+            MenuMode.LoadMaze => clientOwnsSession || sessionBusy || string.IsNullOrWhiteSpace(_loadMazePanel.SelectedSaveId),
+            MenuMode.DeleteMaze => clientOwnsSession || hostLobbyActive || sessionBusy || string.IsNullOrWhiteSpace(_deleteMazePanel.SelectedSaveId),
             _ => true
         };
+
+        UpdateModePresentation();
     }
 
     private void UpdateSessionActionState()
@@ -204,11 +224,17 @@ public partial class MainMenu : Control
         _offlineSessionButton.Disabled = sessionActive;
         _hostSessionButton.Disabled = sessionActive;
         _joinSessionButton.Disabled = sessionActive;
-        _sessionAddressRow.Visible = _currentSessionMode == SessionMode.Join || _sessionRole == SessionRole.Client;
+        _playerNameRow.Visible = _currentSessionMode != SessionMode.Offline || _sessionRole != SessionRole.Offline;
+        _sessionAddressRow.Visible = _currentSessionMode == SessionMode.Join || _sessionRole == SessionRole.Client || _connectionStatus == ConnectionStatus.Connecting;
 
         if (sessionActive)
         {
-            _sessionActionButton.Text = "Sitzung beenden";
+            _sessionActionButton.Text = _connectionStatus switch
+            {
+                ConnectionStatus.Connecting => "Verbindung abbrechen",
+                ConnectionStatus.Starting => "Host-Start abbrechen",
+                _ => "Sitzung beenden"
+            };
             _sessionActionButton.Disabled = false;
             return;
         }
@@ -228,6 +254,8 @@ public partial class MainMenu : Control
                 _sessionActionButton.Disabled = true;
                 break;
         }
+
+        UpdateSessionModePresentation();
     }
 
     private void OnActionPressed()
@@ -279,6 +307,114 @@ public partial class MainMenu : Control
         _panel.CustomMinimumSize = new Vector2(
             Mathf.Min(DesiredPanelSize.X, Mathf.Max(0f, availableSize.X)),
             Mathf.Min(DesiredPanelSize.Y, Mathf.Max(0f, availableSize.Y)));
+    }
+
+    private void UpdateModePresentation()
+    {
+        switch (_currentMode)
+        {
+            case MenuMode.NewMaze:
+                _modeTitleLabel.Text = "Neues Labyrinth";
+                _modeDescriptionLabel.Text = _currentSessionMode switch
+                {
+                    SessionMode.Host => "Du legst die Welt fuer die Lobby fest. Erst danach koennen Clients spaeter denselben autoritativen Lauf erhalten.",
+                    SessionMode.Join => "Clients starten in Phase 2 keine eigene Welt. Verbinde zuerst mit einem Host und warte auf dessen Spielstart.",
+                    _ => "Konfiguriere Groesse, Darstellung und spaetere Gameplay-Regeln fuer einen neuen Offline-Lauf."
+                };
+                _actionButton.Text = _currentSessionMode switch
+                {
+                    SessionMode.Host => "Als Host neues Spiel starten",
+                    SessionMode.Join => "Host waehlt den Start",
+                    _ => "Offline starten"
+                };
+                break;
+            case MenuMode.LoadMaze:
+                _modeTitleLabel.Text = "Gespeicherte Labyrinthe";
+                _modeDescriptionLabel.Text = _currentSessionMode == SessionMode.Host
+                    ? "Der Host waehlt einen lokalen Spielstand als gemeinsame Ausgangswelt fuer die Lobby."
+                    : "Waehle einen vorhandenen Spielstand und setze das Labyrinth lokal mit gespeicherter Struktur fort.";
+                _actionButton.Text = _currentSessionMode == SessionMode.Host ? "Als Host laden" : "Offline laden";
+                break;
+            default:
+                _modeTitleLabel.Text = "Labyrinth loeschen";
+                _modeDescriptionLabel.Text = "Entferne einen gespeicherten Spielstand dauerhaft aus dem lokalen Save-Ordner.";
+                _actionButton.Text = "Loeschen";
+                break;
+        }
+    }
+
+    private void UpdateSessionModePresentation()
+    {
+        switch (_currentSessionMode)
+        {
+            case SessionMode.Host:
+                _sessionModeTitleLabel.Text = "Host-Lobby";
+                _sessionModeDescriptionLabel.Text = IsSessionActive()
+                    ? "Die Lobby ist offen. Waehl darunter ein neues Labyrinth oder einen Save und starte den Lauf als Host."
+                    : "Starte zuerst einen Host. Danach bleibt das Menue offen, damit du den Weltstart fuer alle Clients festlegen kannst.";
+                break;
+            case SessionMode.Join:
+                _sessionModeTitleLabel.Text = "Client-Beitritt";
+                _sessionModeDescriptionLabel.Text = IsSessionActive()
+                    ? "Du bist mit einer Lobby verbunden. In Phase 2 wartet der Client hier auf den spaeteren Host-Startvertrag."
+                    : "Trage die Host-Adresse und den Port ein. Ein Join-Versuch blockiert keine unklaren Offline-Aktionen mehr.";
+                break;
+            default:
+                _sessionModeTitleLabel.Text = "Offline-Lauf";
+                _sessionModeDescriptionLabel.Text = "Starte lokal ohne Netzwerk. Host- und Join-Lobby bleiben getrennte Wege mit eigener Statusanzeige.";
+                break;
+        }
+    }
+
+    private void UpdateLobbyState()
+    {
+        _lobbyPlayersList.Clear();
+
+        string playerName = GetRequestedPlayerName();
+        int peerCount = _connectedPeerIds.Count;
+
+        _sessionSummaryLabel.Text = _currentSessionMode switch
+        {
+            SessionMode.Host => IsSessionActive()
+                ? $"Lokaler Host: {playerName} | Peer-ID {_localPeerId} | Verbundene Peers: {peerCount}"
+                : $"Bereit als Host: {playerName} | Port {(int)Math.Round(_sessionPortSpinBox.Value)}",
+            SessionMode.Join => IsSessionActive()
+                ? $"Verbunden als {playerName} | Ziel {_sessionAddressEdit.Text.Trim()}:{(int)Math.Round(_sessionPortSpinBox.Value)} | Peer-ID {_localPeerId}"
+                : $"Bereit zum Join als {playerName} | Ziel {_sessionAddressEdit.Text.Trim()}:{(int)Math.Round(_sessionPortSpinBox.Value)}",
+            _ => "Keine Lobby aktiv. Offline-Laeufe verwenden nur lokale Saves und lokale Weltstarts."
+        };
+
+        _lobbyHintLabel.Text = _currentSessionMode switch
+        {
+            SessionMode.Host => "Lobby-Uebersicht",
+            SessionMode.Join => "Verbindungs-Uebersicht",
+            _ => "Offline-Uebersicht"
+        };
+
+        if (_connectedPeerIds.Count == 0)
+        {
+            _lobbyPlayersList.AddItem(_currentSessionMode == SessionMode.Offline
+                ? "Keine Netzwerk-Teilnehmer."
+                : "Noch keine Peers sichtbar.");
+            _lobbyPlayersList.SetItemDisabled(0, true);
+            return;
+        }
+
+        foreach (long peerId in _connectedPeerIds)
+        {
+            string peerLabel = peerId == _localPeerId
+                ? $"Peer {peerId} (lokal: {playerName})"
+                : $"Peer {peerId}";
+            _lobbyPlayersList.AddItem(peerLabel);
+        }
+    }
+
+    private string GetRequestedPlayerName()
+    {
+        string playerName = _playerNameEdit.Text.Trim();
+        return string.IsNullOrWhiteSpace(playerName)
+            ? (_currentSessionMode == SessionMode.Host ? "Host" : "Spieler")
+            : playerName;
     }
 
     private bool IsSessionActive() =>
