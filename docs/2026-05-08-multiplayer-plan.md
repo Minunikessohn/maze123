@@ -508,23 +508,83 @@ Ziel: Der Multiplayer ist nicht nur im Happy Path nutzbar, sondern verhaelt sich
 
 Ziel: Jede Ausbaustufe muss mit einem engen Test pruefbar bleiben.
 
-**Empfohlene Validierung pro Ausbaupunkt:**
+**Definition of Done fuer den Multiplayer-MVP:**
 
-1. Host startet erfolgreich auf Port.
-2. Client kann per IP verbinden.
-3. Client erhaelt Welt-Snapshot.
-4. Zwei Spieler sind gleichzeitig sichtbar.
-5. Remote-Bewegung laeuft flussig genug.
-6. Monster jagen denselben Spieler auf allen Instanzen konsistent.
-7. Fallen werden genau einmal konsumiert.
-8. Goal/Catch-Ereignisse sind auf allen Clients gleich.
-9. Disconnect fuehrt zu sauberem Rueckfall.
+- `dotnet build .\Maze123.csproj` bleibt gruen.
+- Zwei lokal gestartete Instanzen koennen sich per LAN-IP beziehungsweise `127.0.0.1` verbinden.
+- Der Host sendet nach neuem Maze-Start oder Host-Load einen gueltigen Startvertrag.
+- Beide Instanzen sehen dieselbe Welt und gleichzeitig sichtbare Spieler.
+- Host und Client fallen nach Leave, Host-Stop oder Verbindungsfehler deterministisch ins Hauptmenue zurueck.
+- Monster-, Trap- und Day/Night-Zustand bleiben waehrend eines kurzen Koop-Laufs auf beiden Instanzen konsistent genug fuer einen spielbaren MVP.
+
+**Pflicht-Smoketest vor jedem groesseren Multiplayer-Schritt:**
+
+1. `dotnet build .\Maze123.csproj`
+2. Erste Instanz starten und als Host oeffnen.
+3. Zweite Instanz starten und als Client verbinden.
+4. Auf dem Host ein neues Maze starten oder einen Host-geeigneten Spielstand laden.
+5. Pruefen, dass der Client den Startvertrag anwendet und ins Spiel wechselt.
+6. Beide Figuren kurz bewegen und danach die Session einmal kontrolliert beenden.
+
+Wenn dieser Pfad fehlschlaegt, darf die naechste Multiplayer-Ausbaustufe nicht begonnen werden.
+
+**Empfohlene Testpfade fuer die MVP-Abnahme:**
+
+1. **Host-Start**
+  Erwartung: Host-Session startet ohne Fehler, zeigt Hosting-Status und bleibt im Menue stabil wartend.
+2. **Client-Join**
+  Erwartung: Client verbindet sich per IP und zeigt den verbundenen Status ohne haengenden Zwischenzustand.
+3. **Startvertrag / Welt-Snapshot**
+  Erwartung: Nach Host-Start eines Laufs wechselt der Client aus dem Menue in dieselbe Session und bestaetigt den Startvertrag.
+4. **Spieler-Sichtbarkeit**
+  Erwartung: Beide Spieler-Avatare existieren gleichzeitig; Remote-Avatare verschwinden nach Disconnect wieder sauber.
+5. **Bewegungsreplikation**
+  Erwartung: Remote-Bewegung ist sichtbar, Positionsspruenge bleiben fuer den MVP selten und kurz.
+6. **Host-authoritative Weltlogik**
+  Erwartung: Monster-Ziele, Fallenstatus und Day/Night werden nicht pro Client divergent.
+7. **Session-Ende und Fehlerpfade**
+  Erwartung: Leave, Host-Stop, Join-Fehler und abgebrochene Verbindung fuehren zurueck ins Hauptmenue ohne stale Remote-Avatare, Monster oder Snapshot-Timer.
+
+**Konkrete manuelle Testmatrix:**
+
+1. **Pfad A - Happy Path**
+  Host auf Standardport starten, Client verbinden, neues Maze erzeugen, 30 bis 60 Sekunden gemeinsam laufen, dann Host beendet die Sitzung.
+2. **Pfad B - Host-Load statt New Game**
+  Host startet Sitzung, laedt einen hostseitig erlaubten Spielstand, Client uebernimmt Welt und beide Figuren erscheinen korrekt.
+3. **Pfad C - Client trennt sich aktiv**
+  Host laeuft weiter, Client waehlt Leave, Remote-Avatar verschwindet auf dem Host und der Client landet sauber im Hauptmenue.
+4. **Pfad D - Host faellt weg**
+  Host beendet Sitzung oder schliesst die Instanz, Client erkennt den Fehlerpfad und landet ohne halb aktiven Spielzustand im Hauptmenue.
+5. **Pfad E - Ungueltiger Join**
+  Client verbindet zu falscher IP oder falschem Port; die UI zeigt den Fehler explizit und bleibt bedienbar.
+
+**Gezielte Beobachtungspunkte im bestehenden Code:**
+
+- Host/Join-Lifecycle: Logs fuer `Host-Session gestartet`, `Client-Verbindung gestartet`, `Peer verbunden` und `Peer getrennt`.
+- Startvertrag: Logs fuer `Startvertrag=...` auf dem Host sowie `Startvertrag empfangen und angewendet` auf dem Client.
+- Session-Zustaende: `Session-Status: Rolle=..., Status=...` fuer Host, Client, Offline und Error.
+- Rueckfallpfade: Session-Ende muss sicht- und pruefbar `ReturnToMainMenuFromSessionEnd(...)` ausloesen, sodass Remote-Avatare, Monster-Ziele, Trap-Runtime und Snapshot-Timer geleert werden.
+
+**MVP-Abnahmekriterien fuer stabil genug:**
+
+- Der Happy Path funktioniert in mindestens drei direkten Wiederholungen hintereinander ohne Neustart des Editors zwischen den Laeufen.
+- Pfad C und Pfad D hinterlassen keine sichtbaren Remote-Avatare, keine verwaisten Monster-Ziele und keinen blockierten Menuezustand.
+- Join-Fehler und ungueltige Startvertraege fuehren in einen klaren Fehler- oder Offline-Zustand statt in einen halb synchronisierten Lauf.
+- Ein kurzer Koop-Lauf mit Monster und Fallen bleibt fuer beide Instanzen spielbar, auch wenn die Bewegung noch kein voll poliertes Netcode-Gefuehl hat.
+
+**Nicht Teil der Phase-14-Abnahme:**
+
+- synthetische Lasttests mit mehr als zwei lokalen Instanzen
+- Internet-Reichweite, NAT oder Relay
+- automatisierte Gameplay-Integrationstests ausserhalb der verfuegbaren lokalen Godot- und Build-Pfade
+- netzwerkgenaue Performance-Metriken oder Prediction/Interpolation-Polish
 
 **Empfohlene technische Checks:**
 
 - `dotnet build .\Maze123.csproj`
-- Host/Client-Playtest mit zwei gestarteten Instanzen
-- gezielte Debug-Ausgaben fuer Peer-Join, Snapshot-Empfang, Catch-Events und Disconnects
+- Zwei lokale Godot-Instanzen ueber die vorhandenen VS-Code-Launch-Konfigurationen starten
+- Playtest mit Host/Client inklusive Join-, Start-, Snapshot- und Disconnect-Beobachtung
+- gezielte Debug-Ausgaben fuer Peer-Join, Startvertrag, Snapshot-Empfang und Session-Ende aktiv mitlesen
 
 ## Empfohlene Umsetzungsreihenfolge
 
