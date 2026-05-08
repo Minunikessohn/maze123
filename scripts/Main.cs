@@ -642,21 +642,7 @@ public partial class Main : Node
 
     private void OnReturnToMainMenuRequested()
     {
-        _multiplayerSession.StopSession("Sitzung beendet. Zurueck im Hauptmenue.");
-        StopManualMode(force: true);
-        _runner.StopAll();
-        _player.Hide();
-        _view3D.ClearRemotePlayerAvatars();
-        _playerIdentities.Clear();
-        _view3D.ClearTrail();
-        _view3D.ClearProximityEffects();
-        ClearTrapRuntimeState(clearDefinitions: true);
-        SyncMonsterPlayerTargets();
-        SetMapOverlayVisible(false);
-        ResetExploreMode();
-        ClearPlayerCameraModes();
-        RefreshSaveSlots();
-        TransitionToState(GameFlowState.MainMenu);
+        ReturnToMainMenuFromSessionEnd("Sitzung beendet. Zurueck im Hauptmenue.", stopSession: true);
     }
 
     private void OnHostSessionRequested(string playerName, int port)
@@ -679,13 +665,27 @@ public partial class Main : Node
 
     private void OnLeaveSessionRequested()
     {
-        _multiplayerSession.StopSession("Sitzung beendet.");
+        ReturnToMainMenuFromSessionEnd("Sitzung beendet.", stopSession: true);
     }
 
     private void OnMultiplayerSessionStateChanged(SessionRole role, ConnectionStatus status, string message)
     {
+        SessionRole previousRole = _sessionState.SessionRole;
+        ConnectionStatus previousStatus = _sessionState.ConnectionStatus;
         SyncMultiplayerSessionState();
         _mainMenu.SetSessionState(role, status, message, _sessionState.ConnectedPeerIds, _sessionState.LocalPeerId);
+
+        if (ShouldReturnToMainMenuAfterSessionTransition(previousRole, previousStatus, role, status))
+        {
+            ReturnToMainMenuFromSessionEnd(message, stopSession: false);
+            _mainMenu.SetSessionState(
+                _sessionState.SessionRole,
+                _sessionState.ConnectionStatus,
+                _sessionState.ConnectionMessage,
+                _sessionState.ConnectedPeerIds,
+                _sessionState.LocalPeerId);
+        }
+
         GD.Print($"[Main] Session-Status: Rolle={role}, Status={status}, Nachricht='{message}'");
     }
 
@@ -728,7 +728,7 @@ public partial class Main : Node
 
         if (!TryApplySessionStartPayload(payload))
         {
-            TransitionToState(GameFlowState.MainMenu);
+            ReturnToMainMenuFromSessionEnd("Startvertrag konnte nicht angewendet werden. Sitzung wurde beendet.", stopSession: true);
             return;
         }
 
@@ -1705,9 +1705,71 @@ public partial class Main : Node
             _view3D.ClearRemotePlayerAvatars();
             _playerIdentities.Clear();
             ResetNetworkSnapshotTimers();
+            _sessionState.RetainOnlyPlayerState(LocalSessionPlayerId);
         }
 
         SyncMonsterPlayerTargets();
+    }
+
+    private bool ShouldReturnToMainMenuAfterSessionTransition(
+        SessionRole previousRole,
+        ConnectionStatus previousStatus,
+        SessionRole currentRole,
+        ConnectionStatus currentStatus)
+    {
+        bool hadActiveSession = previousRole is SessionRole.Host or SessionRole.Client
+            || previousStatus is ConnectionStatus.Starting or ConnectionStatus.Hosting or ConnectionStatus.Connecting or ConnectionStatus.Connected or ConnectionStatus.Synchronized;
+        bool sessionEnded = currentRole == SessionRole.Offline
+            && currentStatus is ConnectionStatus.Offline or ConnectionStatus.Error;
+
+        if (!hadActiveSession || !sessionEnded)
+        {
+            return false;
+        }
+
+        return _flowState != GameFlowState.MainMenu
+            || _isManualMode
+            || _playerIdentities.Count > 0
+            || _view3D.Visible;
+    }
+
+    private void ReturnToMainMenuFromSessionEnd(string message, bool stopSession)
+    {
+        if (stopSession && _multiplayerSession.Role != SessionRole.Offline)
+        {
+            _multiplayerSession.StopSession(message);
+        }
+
+        StopManualMode(force: true);
+        _runner.StopAll();
+        _player.Hide();
+        _view3D.ClearRemotePlayerAvatars();
+        _playerIdentities.Clear();
+        _view3D.ClearTrail();
+        _view3D.ClearProximityEffects();
+        _monsterManager.Configure(null, null, Array.Empty<Vector2I>(), _view3D.CellSize);
+        _monsterManager.UpdatePlayers(Array.Empty<MonsterPlayerTarget>());
+        _sessionState.ActiveMonsterCells.Clear();
+        _sessionState.MonsterSpawnCells.Clear();
+        ClearTrapRuntimeState(clearDefinitions: true);
+        _sessionState.RetainOnlyPlayerState(LocalSessionPlayerId);
+        SyncMonsterPlayerTargets();
+        ResetNetworkSnapshotTimers();
+        SetMapOverlayVisible(false);
+        ResetExploreMode();
+        ClearPlayerCameraModes();
+        RefreshSaveSlots();
+        TransitionToState(GameFlowState.MainMenu);
+
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            _mainMenu.SetSessionState(
+                _sessionState.SessionRole,
+                _sessionState.ConnectionStatus,
+                message,
+                _sessionState.ConnectedPeerIds,
+                _sessionState.LocalPeerId);
+        }
     }
 
     private void SyncMonsterPlayerTargets()

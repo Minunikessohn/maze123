@@ -132,6 +132,23 @@ public sealed class GameSessionState
         PlayerStates.Remove(effectivePeerId);
     }
 
+    public void RetainOnlyPlayerState(long peerId)
+    {
+        long effectivePeerId = peerId > 0 ? peerId : OfflinePlayerId;
+
+        foreach (long existingPeerId in new List<long>(PlayerStates.Keys))
+        {
+            if (existingPeerId == effectivePeerId)
+            {
+                continue;
+            }
+
+            PlayerStates.Remove(existingPeerId);
+        }
+
+        GetOrCreatePlayerState(effectivePeerId);
+    }
+
     public IEnumerable<KeyValuePair<long, PlayerRuntimeState>> EnumerateMonsterTargetStates()
     {
         foreach ((long peerId, PlayerRuntimeState state) in PlayerStates)
