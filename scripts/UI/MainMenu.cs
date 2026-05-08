@@ -3,6 +3,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using Godot;
 using Maze.Game;
 using Maze.Network;
@@ -60,6 +63,7 @@ public partial class MainMenu : Control
     private ConnectionStatus _connectionStatus = ConnectionStatus.Offline;
     private readonly List<long> _connectedPeerIds = new();
     private long _localPeerId;
+    private string _localHostAddressSummary = string.Empty;
 
     public event Action<string, MazeGameConfig>? StartNewMazeRequested;
     public event Action<string>? LoadMazeRequested;
@@ -149,6 +153,7 @@ public partial class MainMenu : Control
         _sessionRole = role;
         _connectionStatus = status;
         _localPeerId = localPeerId;
+        _localHostAddressSummary = role == SessionRole.Host ? BuildLocalHostAddressSummary() : string.Empty;
         _connectedPeerIds.Clear();
         _connectedPeerIds.AddRange(connectedPeerIds.Distinct().OrderBy(peerId => peerId));
         _sessionStatusLabel.Text = string.IsNullOrWhiteSpace(message) ? "Keine Sitzung aktiv." : message;
@@ -376,7 +381,7 @@ public partial class MainMenu : Control
         _sessionSummaryLabel.Text = _currentSessionMode switch
         {
             SessionMode.Host => IsSessionActive()
-                ? $"Lokaler Host: {playerName} | Peer-ID {_localPeerId} | Verbundene Peers: {peerCount}"
+                ? $"Lokaler Host: {playerName} | Peer-ID {_localPeerId} | Verbundene Peers: {peerCount} | LAN-IP {FormatLocalHostAddressSummary()}"
                 : $"Bereit als Host: {playerName} | Port {(int)Math.Round(_sessionPortSpinBox.Value)}",
             SessionMode.Join => IsSessionActive()
                 ? $"Verbunden als {playerName} | Ziel {_sessionAddressEdit.Text.Trim()}:{(int)Math.Round(_sessionPortSpinBox.Value)} | Peer-ID {_localPeerId}"
@@ -415,6 +420,58 @@ public partial class MainMenu : Control
         return string.IsNullOrWhiteSpace(playerName)
             ? (_currentSessionMode == SessionMode.Host ? "Host" : "Spieler")
             : playerName;
+    }
+
+    private string FormatLocalHostAddressSummary() =>
+        string.IsNullOrWhiteSpace(_localHostAddressSummary) ? "unbekannt" : _localHostAddressSummary;
+
+    private static string BuildLocalHostAddressSummary()
+    {
+        try
+        {
+            HashSet<string> addresses = new(StringComparer.Ordinal);
+
+            foreach (NetworkInterface networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (networkInterface.OperationalStatus != OperationalStatus.Up
+                    || networkInterface.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                {
+                    continue;
+                }
+
+                foreach (UnicastIPAddressInformation unicastAddress in networkInterface.GetIPProperties().UnicastAddresses)
+                {
+                    if (unicastAddress.Address.AddressFamily != AddressFamily.InterNetwork
+                        || IPAddress.IsLoopback(unicastAddress.Address))
+                    {
+                        continue;
+                    }
+
+                    string addressText = unicastAddress.Address.ToString();
+                    if (addressText.StartsWith("169.254.", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    addresses.Add(addressText);
+                }
+            }
+
+            return addresses.Count > 0
+                ? string.Join(", ", addresses.OrderBy(address => address).Take(3))
+                : Dns.GetHostAddresses(Dns.GetHostName())
+                    .Where(address => address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address))
+                    .Select(address => address.ToString())
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(address => address)
+                    .Take(3)
+                    .DefaultIfEmpty("unbekannt")
+                    .Aggregate((left, right) => $"{left}, {right}");
+        }
+        catch
+        {
+            return "unbekannt";
+        }
     }
 
     private bool IsSessionActive() =>

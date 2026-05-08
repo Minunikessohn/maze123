@@ -95,6 +95,7 @@ public partial class Main : Node
     private double _hostSnapshotAccumulator;
     private string _pendingSaveDisplayName = string.Empty;
     private readonly HashSet<Vector2I> _knownActiveTrapCells = new();
+    private readonly Dictionary<long, PlayerRuntimeState> _authoritativeRemotePlayerOverrides = new();
 
     private long LocalSessionPlayerId => _sessionState.EffectiveLocalPlayerId;
 
@@ -288,6 +289,11 @@ public partial class Main : Node
             state.IsAlive = true;
         });
 
+        if (peerId != LocalSessionPlayerId && _sessionState.TryGetPlayerState(peerId, out PlayerRuntimeState authoritativeRemoteState))
+        {
+            _authoritativeRemotePlayerOverrides[peerId] = ClonePlayerRuntimeState(authoritativeRemoteState);
+        }
+
         if (peerId != LocalSessionPlayerId
             && _playerIdentities.TryGetValue(peerId, out PlayerIdentity? playerIdentity)
             && _sessionState.TryGetPlayerState(peerId, out PlayerRuntimeState remoteState))
@@ -414,6 +420,7 @@ public partial class Main : Node
         }
 
         TransitionToState(GameFlowState.Playing);
+        BroadcastSessionStartIfHosting("Host hat einen Spielstand fuer die Lobby geladen.");
     }
 
     private void OnDeleteMazeRequested(string saveId)
@@ -624,6 +631,12 @@ public partial class Main : Node
             return;
         }
 
+        if (!CanChangePauseStateLocally())
+        {
+            _hud.SetPauseActive(_flowState == GameFlowState.Paused);
+            return;
+        }
+
         TransitionToState(paused ? GameFlowState.Paused : GameFlowState.Playing);
     }
 
@@ -715,7 +728,9 @@ public partial class Main : Node
             _sessionState.ConnectedPeerIds,
             _sessionState.LocalPeerId);
 
-        if (_multiplayerSession.Role == SessionRole.Host && _currentMaze is not null && _flowState != GameFlowState.MainMenu)
+        if (_multiplayerSession.Role == SessionRole.Host
+            && _currentMaze is not null
+            && _flowState is GameFlowState.Playing or GameFlowState.Paused)
         {
             CallDeferred(nameof(SynchronizeLateJoinClient));
         }
@@ -725,6 +740,7 @@ public partial class Main : Node
 
     private void OnMultiplayerPeerLeft(long peerId)
     {
+        _authoritativeRemotePlayerOverrides.Remove(peerId);
         _sessionState.RemovePlayerState(peerId);
         _playerIdentities.Remove(peerId);
         _view3D.RemoveRemotePlayerAvatar(peerId);
@@ -754,8 +770,8 @@ public partial class Main : Node
             return;
         }
 
-        GameFlowState targetState = payload.World.FlowState == GameFlowState.Paused
-            ? GameFlowState.Paused
+        GameFlowState targetState = payload.World.FlowState is GameFlowState.Loading or GameFlowState.Playing or GameFlowState.Paused
+            ? payload.World.FlowState
             : GameFlowState.Playing;
         TransitionToState(targetState);
         _multiplayerSession.ConfirmSessionStartApplied(payload.SessionId);
@@ -774,9 +790,22 @@ public partial class Main : Node
             return;
         }
 
+        bool hadPreviousState = _sessionState.TryGetPlayerState(peerId, out PlayerRuntimeState previousState);
+        PlayerRuntimeState authoritativeState = BuildAuthoritativeRemotePlayerState(peerId, playerSnapshot.RuntimeState);
+
         CachePlayerIdentity(playerSnapshot.Identity);
-        _sessionState.SetPlayerState(peerId, playerSnapshot.RuntimeState);
-        ApplyRemotePlayerSnapshot(playerSnapshot);
+        _sessionState.SetPlayerState(peerId, authoritativeState);
+        ApplyRemotePlayerSnapshot(new PlayerSnapshot
+        {
+            Identity = ClonePlayerIdentity(playerSnapshot.Identity),
+            RuntimeState = ClonePlayerRuntimeState(authoritativeState)
+        });
+
+        if ((!hadPreviousState || !previousState.GoalReached) && authoritativeState.GoalReached)
+        {
+            GD.Print($"[Main] Host bestaetigt Ziel fuer Peer {peerId}.");
+        }
+
         SyncMonsterPlayerTargets();
     }
 
@@ -802,7 +831,7 @@ public partial class Main : Node
         ApplyTrapCellsToSessionState(ConvertTrapCells(worldSnapshot.ActiveTrapCells));
 
         if (_flowState is GameFlowState.Loading or GameFlowState.Playing or GameFlowState.Paused
-            && worldSnapshot.FlowState is GameFlowState.Playing or GameFlowState.Paused
+            && worldSnapshot.FlowState is GameFlowState.Loading or GameFlowState.Playing or GameFlowState.Paused
             && _flowState != worldSnapshot.FlowState)
         {
             TransitionToState(worldSnapshot.FlowState);
@@ -1296,6 +1325,11 @@ public partial class Main : Node
 
     private void TogglePauseMenu()
     {
+        if (!CanChangePauseStateLocally())
+        {
+            return;
+        }
+
         if (_flowState == GameFlowState.Playing)
         {
             TransitionToState(GameFlowState.Paused);
@@ -1583,7 +1617,8 @@ public partial class Main : Node
 
     private PlayerRuntimeState CreatePlayerRuntimeState(PlayerIdentity playerIdentity, MazePointSaveData defaultSpawnCell)
     {
-        PlayerRuntimeState state = _sessionState.TryGetPlayerState(playerIdentity.PeerId, out PlayerRuntimeState existingState)
+        bool hasExistingState = _sessionState.TryGetPlayerState(playerIdentity.PeerId, out PlayerRuntimeState existingState);
+        PlayerRuntimeState state = hasExistingState
             ? ClonePlayerRuntimeState(existingState)
             : new PlayerRuntimeState
             {
@@ -1606,7 +1641,10 @@ public partial class Main : Node
             return state;
         }
 
-        state.SetWorldPosition(global::Maze.MazeWorldGrid.CellToWorldCenter(defaultSpawnCell.ToVector2I(), _view3D.CellSize));
+        if (!hasExistingState)
+        {
+            state.SetWorldPosition(global::Maze.MazeWorldGrid.CellToWorldCenter(defaultSpawnCell.ToVector2I(), _view3D.CellSize));
+        }
 
         return state;
     }
@@ -1728,6 +1766,7 @@ public partial class Main : Node
         {
             _view3D.ClearRemotePlayerAvatars();
             _playerIdentities.Clear();
+            _authoritativeRemotePlayerOverrides.Clear();
             ResetNetworkSnapshotTimers();
             _sessionState.RetainOnlyPlayerState(LocalSessionPlayerId);
         }
@@ -1769,6 +1808,7 @@ public partial class Main : Node
         _player.Hide();
         _view3D.ClearRemotePlayerAvatars();
         _playerIdentities.Clear();
+        _authoritativeRemotePlayerOverrides.Clear();
         _view3D.ClearTrail();
         _view3D.ClearProximityEffects();
         _monsterManager.Configure(null, null, Array.Empty<Vector2I>(), _view3D.CellSize);
@@ -1979,6 +2019,46 @@ public partial class Main : Node
         return true;
     }
 
+    private PlayerRuntimeState BuildAuthoritativeRemotePlayerState(long peerId, PlayerRuntimeState clientRuntimeState)
+    {
+        PlayerRuntimeState effectiveState = ClonePlayerRuntimeState(clientRuntimeState);
+
+        if (_authoritativeRemotePlayerOverrides.TryGetValue(peerId, out PlayerRuntimeState? authoritativeOverride))
+        {
+            if (HasAcknowledgedAuthoritativeRemoteState(clientRuntimeState, authoritativeOverride))
+            {
+                _authoritativeRemotePlayerOverrides.Remove(peerId);
+            }
+            else
+            {
+                effectiveState = ClonePlayerRuntimeState(authoritativeOverride);
+            }
+        }
+
+        effectiveState.GoalReached = ShouldAcceptRemoteGoalReached(effectiveState);
+        return effectiveState;
+    }
+
+    private bool ShouldAcceptRemoteGoalReached(PlayerRuntimeState runtimeState)
+    {
+        if (!runtimeState.GoalReached || _currentMaze is null)
+        {
+            return false;
+        }
+
+        Cell goalCell = ResolveGoalCell(_currentMaze);
+        return runtimeState.CurrentCell.X == goalCell.X && runtimeState.CurrentCell.Y == goalCell.Y;
+    }
+
+    private static bool HasAcknowledgedAuthoritativeRemoteState(PlayerRuntimeState clientRuntimeState, PlayerRuntimeState authoritativeState)
+    {
+        return clientRuntimeState.CurrentCell.X == authoritativeState.CurrentCell.X
+            && clientRuntimeState.CurrentCell.Y == authoritativeState.CurrentCell.Y
+            && clientRuntimeState.IsAlive == authoritativeState.IsAlive
+            && clientRuntimeState.IsManualMode == authoritativeState.IsManualMode
+            && clientRuntimeState.GoalReached == authoritativeState.GoalReached;
+    }
+
     private IEnumerable<PlayerIdentity> GetOrderedPlayerIdentities()
     {
         List<PlayerIdentity> orderedIdentities = new(_playerIdentities.Values);
@@ -2034,6 +2114,17 @@ public partial class Main : Node
     private bool CanPersistOfflineSave() =>
         _sessionState.SessionRole == SessionRole.Offline
         && _sessionState.ConnectionStatus is not ConnectionStatus.Connecting;
+
+    private bool CanChangePauseStateLocally()
+    {
+        if (_multiplayerSession.Role != SessionRole.Client)
+        {
+            return true;
+        }
+
+        GD.Print("[Main] Pause ist im Multiplayer nur fuer den Host autoritativ.");
+        return false;
+    }
 
     private Cell ResolveStartCell(global::Maze.Model.Maze maze) =>
         ResolveSessionPoint(maze, _sessionState.StartCell, 0, 0);
