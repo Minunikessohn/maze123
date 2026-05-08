@@ -39,6 +39,7 @@ public partial class MultiplayerSession : Node
     public event Action<long, string>? SessionStartAcknowledged;
     public event Action<long, PlayerSnapshot>? ClientPlayerSnapshotReceived;
     public event Action<PlayerSnapshotBatch>? PlayerSnapshotBatchReceived;
+    public event Action<WorldRuntimeSnapshot>? WorldSnapshotReceived;
 
     public override void _Ready()
     {
@@ -255,6 +256,27 @@ public partial class MultiplayerSession : Node
         return Error.Ok;
     }
 
+    public Error BroadcastWorldSnapshot(WorldRuntimeSnapshot worldSnapshot)
+    {
+        if (Role != SessionRole.Host || Multiplayer.MultiplayerPeer is null)
+        {
+            return Error.Unavailable;
+        }
+
+        string serializedSnapshot = JsonSerializer.Serialize(worldSnapshot, JsonOptions);
+        foreach (long peerId in _connectedPeers.OrderBy(peerId => peerId))
+        {
+            if (peerId == LocalPeerId)
+            {
+                continue;
+            }
+
+            RpcId(peerId, nameof(ReceiveWorldSnapshotRpc), serializedSnapshot);
+        }
+
+        return Error.Ok;
+    }
+
     private void OnPeerConnected(long peerId)
     {
         if (_connectedPeers.Add(peerId))
@@ -459,6 +481,33 @@ public partial class MultiplayerSession : Node
         }
 
         PlayerSnapshotBatchReceived?.Invoke(snapshotBatch);
+    }
+
+    [Rpc(MultiplayerApi.RpcMode.Authority, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.UnreliableOrdered)]
+    private void ReceiveWorldSnapshotRpc(string worldSnapshotJson)
+    {
+        if (Role != SessionRole.Client)
+        {
+            return;
+        }
+
+        WorldRuntimeSnapshot? worldSnapshot;
+        try
+        {
+            worldSnapshot = JsonSerializer.Deserialize<WorldRuntimeSnapshot>(worldSnapshotJson, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[MultiplayerSession] World-Snapshot konnte nicht gelesen werden: {ex.Message}");
+            return;
+        }
+
+        if (worldSnapshot is null)
+        {
+            return;
+        }
+
+        WorldSnapshotReceived?.Invoke(worldSnapshot);
     }
 
     private void ApplyState(SessionRole role, ConnectionStatus status, string message)

@@ -39,6 +39,11 @@ public partial class DayNightController : Node
         SetTimeOfDay(cycleEnabled ? initialTimeOfDay : 0f, emitSignals: false);
     }
 
+    public void ApplySynchronizedTimeOfDay(float timeOfDay, bool emitSignals = true)
+    {
+        SetTimeOfDay(_cycleEnabled ? timeOfDay : 0f, emitSignals);
+    }
+
     public void SetPaused(bool paused) => _isPaused = paused;
 
     public void Reset(float initialTimeOfDay = 0f) =>

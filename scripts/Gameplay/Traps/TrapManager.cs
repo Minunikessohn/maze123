@@ -17,6 +17,7 @@ public partial class TrapManager : Node3D
     private MazeGameConfig? _config;
     private global::Maze.Model.Maze? _maze;
     private float _cellSize = 1f;
+    private bool _authoritativeConsumptionEnabled = true;
 
     public IReadOnlyList<Vector2I> ActiveTrapCells => _activeTrapCells;
 
@@ -73,6 +74,11 @@ public partial class TrapManager : Node3D
 
     public bool TryConsumeTrapAtCell(Vector2I cell)
     {
+        if (!_authoritativeConsumptionEnabled)
+        {
+            return false;
+        }
+
         if (!_trapInstances.TryGetValue(cell, out TrapInstance? trap) || !trap.IsArmed)
         {
             return false;
@@ -81,6 +87,27 @@ public partial class TrapManager : Node3D
         trap.SetArmed(false);
         _activeTrapCells.Remove(cell);
         return true;
+    }
+
+    public void SetAuthoritativeConsumptionEnabled(bool enabled)
+    {
+        _authoritativeConsumptionEnabled = enabled;
+    }
+
+    public void ApplyActiveTrapCells(IEnumerable<Vector2I> activeTrapCells)
+    {
+        HashSet<Vector2I> activeCells = new(activeTrapCells);
+        _activeTrapCells.Clear();
+
+        foreach ((Vector2I cell, TrapInstance trap) in _trapInstances)
+        {
+            bool shouldBeArmed = activeCells.Contains(cell);
+            trap.SetArmed(shouldBeArmed);
+            if (shouldBeArmed)
+            {
+                _activeTrapCells.Add(cell);
+            }
+        }
     }
 
     public void NotifyPlayerEnteredCell(Vector2I cell)

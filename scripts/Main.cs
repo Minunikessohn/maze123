@@ -132,6 +132,7 @@ public partial class Main : Node
         _multiplayerSession.SessionStartAcknowledged += OnSessionStartAcknowledged;
         _multiplayerSession.ClientPlayerSnapshotReceived += OnClientPlayerSnapshotReceived;
         _multiplayerSession.PlayerSnapshotBatchReceived += OnPlayerSnapshotBatchReceived;
+        _multiplayerSession.WorldSnapshotReceived += OnWorldSnapshotReceived;
         _pauseMenu.VisualSettingsChanged += OnVisualSettingsChanged;
         _pauseMenu.AudioSettingsChanged += OnAudioSettingsChanged;
         _pauseMenu.ReturnToMainMenuRequested += OnReturnToMainMenuRequested;
@@ -241,6 +242,7 @@ public partial class Main : Node
             _multiplayerSession.SessionStartAcknowledged -= OnSessionStartAcknowledged;
             _multiplayerSession.ClientPlayerSnapshotReceived -= OnClientPlayerSnapshotReceived;
             _multiplayerSession.PlayerSnapshotBatchReceived -= OnPlayerSnapshotBatchReceived;
+            _multiplayerSession.WorldSnapshotReceived -= OnWorldSnapshotReceived;
             _multiplayerSession.StopSession("Anwendung beendet.");
         }
 
@@ -748,6 +750,31 @@ public partial class Main : Node
         }
 
         ApplySessionPlayerSnapshots(snapshotBatch.Players);
+    }
+
+    private void OnWorldSnapshotReceived(WorldRuntimeSnapshot worldSnapshot)
+    {
+        if (_multiplayerSession.Role != SessionRole.Client || _currentMaze is null)
+        {
+            return;
+        }
+
+        _sessionState.DayNightProgress = worldSnapshot.DayNightProgress;
+        ApplyTrapCellsToSessionState(ConvertTrapCells(worldSnapshot.ActiveTrapCells));
+
+        if (_flowState is GameFlowState.Loading or GameFlowState.Playing or GameFlowState.Paused
+            && worldSnapshot.FlowState is GameFlowState.Playing or GameFlowState.Paused
+            && _flowState != worldSnapshot.FlowState)
+        {
+            TransitionToState(worldSnapshot.FlowState);
+        }
+        else
+        {
+            _sessionState.FlowState = worldSnapshot.FlowState;
+            SyncDayNightState();
+        }
+
+        SyncTrapState();
     }
 
     private void OnStepRequested() =>
@@ -1739,6 +1766,7 @@ public partial class Main : Node
                 PlayerSnapshotBatch snapshotBatch = BuildPlayerSnapshotBatch();
                 ApplySessionPlayerSnapshots(snapshotBatch.Players);
                 _multiplayerSession.BroadcastPlayerSnapshots(snapshotBatch);
+                _multiplayerSession.BroadcastWorldSnapshot(BuildWorldSnapshot());
                 break;
 
             default:
@@ -1760,6 +1788,22 @@ public partial class Main : Node
         }
 
         return snapshotBatch;
+    }
+
+    private WorldRuntimeSnapshot BuildWorldSnapshot()
+    {
+        WorldRuntimeSnapshot snapshot = new()
+        {
+            FlowState = _flowState,
+            DayNightProgress = _sessionState.DayNightProgress
+        };
+
+        foreach (Vector2I cell in _sessionState.ActiveTrapCells)
+        {
+            snapshot.ActiveTrapCells.Add(new MazePointSaveData(cell.X, cell.Y));
+        }
+
+        return snapshot;
     }
 
     private bool TryBuildPlayerSnapshot(long peerId, out PlayerSnapshot? snapshot)
@@ -1970,6 +2014,14 @@ public partial class Main : Node
         return cells;
     }
 
+    private static IEnumerable<Vector2I> ConvertTrapCells(IEnumerable<MazePointSaveData> trapCells)
+    {
+        foreach (MazePointSaveData trapCell in trapCells)
+        {
+            yield return trapCell.ToVector2I();
+        }
+    }
+
     private static List<Vector2I> ConvertMonsterCells(MazeSaveData saveData)
     {
         List<Vector2I> cells = new(saveData.MonsterSpawnCells.Count);
@@ -2079,11 +2131,12 @@ public partial class Main : Node
     private void ConfigureDayNightCycle(MazeGameConfig config)
     {
         _dayNightController.Configure(config.DayNightCycleEnabled, _sessionState.DayNightProgress);
-        _dayNightController.SetPaused(_flowState != GameFlowState.Playing);
+        _dayNightController.SetPaused(!IsAuthoritativeWorldHost() || _flowState != GameFlowState.Playing);
     }
 
     private void ConfigureTrapSystem()
     {
+        _trapManager.SetAuthoritativeConsumptionEnabled(IsAuthoritativeWorldHost());
         _trapManager.Configure(_currentGameConfig, _currentMaze, _sessionState.TrapDefinitions, _view3D.CellSize);
         SyncTrapState();
     }
@@ -2107,15 +2160,13 @@ public partial class Main : Node
 
     private void SyncTrapState()
     {
-        HashSet<Vector2I> activeTrapCells = new(_trapManager.ActiveTrapCells);
-
-        _sessionState.ActiveTrapCells.Clear();
-        _sessionState.ActiveTrapCells.AddRange(activeTrapCells);
-
-        foreach (TrapDefinition trap in _sessionState.TrapDefinitions)
+        if (IsAuthoritativeWorldHost())
         {
-            trap.IsArmed = activeTrapCells.Contains(trap.Cell);
+            ApplyTrapCellsToSessionState(_trapManager.ActiveTrapCells);
+            return;
         }
+
+        _trapManager.ApplyActiveTrapCells(_sessionState.ActiveTrapCells);
     }
 
     private void ConfigureMonsterSystem() =>
@@ -2133,7 +2184,16 @@ public partial class Main : Node
             return;
         }
 
-        _sessionState.DayNightProgress = _dayNightController.TimeOfDay;
+        if (IsAuthoritativeWorldHost())
+        {
+            _sessionState.DayNightProgress = _dayNightController.TimeOfDay;
+        }
+        else
+        {
+            _dayNightController.SetPaused(true);
+            _dayNightController.ApplySynchronizedTimeOfDay(_sessionState.DayNightProgress, emitSignals: false);
+        }
+
         _monsterManager.Synchronize(GetMonsterSimulationMode());
         _sessionState.ActiveMonsterCells.Clear();
         _sessionState.ActiveMonsterCells.AddRange(_monsterManager.ActiveMonsterCells);
@@ -2145,6 +2205,21 @@ public partial class Main : Node
             _currentGameConfig.NightViewDistance,
             _sessionState.DayNightProgress,
             _dayNightController.IsNight);
+    }
+
+    private bool IsAuthoritativeWorldHost() =>
+        _multiplayerSession.Role != SessionRole.Client;
+
+    private void ApplyTrapCellsToSessionState(IEnumerable<Vector2I> activeTrapCells)
+    {
+        HashSet<Vector2I> activeCells = new(activeTrapCells);
+        _sessionState.ActiveTrapCells.Clear();
+        _sessionState.ActiveTrapCells.AddRange(activeCells);
+
+        foreach (TrapDefinition trap in _sessionState.TrapDefinitions)
+        {
+            trap.IsArmed = activeCells.Contains(trap.Cell);
+        }
     }
 
     private void UpdateMonsterStunCollision()
