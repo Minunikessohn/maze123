@@ -35,6 +35,7 @@ public partial class MultiplayerSession : Node
     public event Action<SessionRole, ConnectionStatus, string>? StateChanged;
     public event Action<long>? PeerJoined;
     public event Action<long>? PeerLeft;
+    public event Action<long>? ClientPlayerRegistered;
     public event Action<SessionStartPayload>? SessionStartReceived;
     public event Action<long, string>? SessionStartAcknowledged;
     public event Action<long, PlayerSnapshot>? ClientPlayerSnapshotReceived;
@@ -207,6 +208,40 @@ public partial class MultiplayerSession : Node
         return Error.Ok;
     }
 
+    public Error SendSessionStartToPeer(long peerId, SessionStartPayload payload)
+    {
+        if (Role != SessionRole.Host || Multiplayer.MultiplayerPeer is null)
+        {
+            return Error.Unavailable;
+        }
+
+        if (payload is null)
+        {
+            GD.PrintErr("[MultiplayerSession] Startvertrag fehlt.");
+            return Error.InvalidData;
+        }
+
+        if (peerId <= 0 || peerId == LocalPeerId || !_connectedPeers.Contains(peerId))
+        {
+            return Error.DoesNotExist;
+        }
+
+        payload.SessionId = string.IsNullOrWhiteSpace(_activeSessionStartId)
+            ? (string.IsNullOrWhiteSpace(payload.SessionId) ? Guid.NewGuid().ToString("N") : payload.SessionId)
+            : _activeSessionStartId;
+        payload.ContractVersion = SessionStartPayload.CurrentContractVersion;
+        payload.CreatedAtUtc = DateTime.UtcNow;
+        payload.HostPeerId = LocalPeerId;
+        _activeSessionStartId = payload.SessionId;
+        _synchronizedPeers.Remove(peerId);
+
+        SessionStartPayload peerPayload = ClonePayloadForRecipient(payload, peerId);
+        string serializedPayload = JsonSerializer.Serialize(peerPayload, JsonOptions);
+        RpcId(peerId, nameof(ReceiveSessionStartPayloadRpc), serializedPayload);
+        ApplyState(SessionRole.Host, ConnectionStatus.Hosting, $"Startvertrag {_activeSessionStartId} gezielt an Client {peerId} gesendet.");
+        return Error.Ok;
+    }
+
     public void ConfirmSessionStartApplied(string sessionId)
     {
         if (Role != SessionRole.Client || string.IsNullOrWhiteSpace(sessionId) || !string.Equals(sessionId, _activeSessionStartId, StringComparison.Ordinal))
@@ -368,6 +403,7 @@ public partial class MultiplayerSession : Node
 
         RegisterPlayerName(senderPeerId, playerName);
         ApplyState(SessionRole.Host, ConnectionStatus.Hosting, $"Lobby aktualisiert. Peer {senderPeerId} ist als '{ResolvePlayerName(senderPeerId, false)}' registriert.");
+        ClientPlayerRegistered?.Invoke(senderPeerId);
     }
 
     [Rpc(MultiplayerApi.RpcMode.Authority, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]

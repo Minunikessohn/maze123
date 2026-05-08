@@ -130,6 +130,7 @@ public partial class Main : Node
         _multiplayerSession.StateChanged += OnMultiplayerSessionStateChanged;
         _multiplayerSession.PeerJoined += OnMultiplayerPeerJoined;
         _multiplayerSession.PeerLeft += OnMultiplayerPeerLeft;
+        _multiplayerSession.ClientPlayerRegistered += OnMultiplayerClientRegistered;
         _multiplayerSession.SessionStartReceived += OnSessionStartReceived;
         _multiplayerSession.SessionStartAcknowledged += OnSessionStartAcknowledged;
         _multiplayerSession.ClientPlayerSnapshotReceived += OnClientPlayerSnapshotReceived;
@@ -240,6 +241,7 @@ public partial class Main : Node
             _multiplayerSession.StateChanged -= OnMultiplayerSessionStateChanged;
             _multiplayerSession.PeerJoined -= OnMultiplayerPeerJoined;
             _multiplayerSession.PeerLeft -= OnMultiplayerPeerLeft;
+            _multiplayerSession.ClientPlayerRegistered -= OnMultiplayerClientRegistered;
             _multiplayerSession.SessionStartReceived -= OnSessionStartReceived;
             _multiplayerSession.SessionStartAcknowledged -= OnSessionStartAcknowledged;
             _multiplayerSession.ClientPlayerSnapshotReceived -= OnClientPlayerSnapshotReceived;
@@ -728,14 +730,19 @@ public partial class Main : Node
             _sessionState.ConnectedPeerIds,
             _sessionState.LocalPeerId);
 
+        GD.Print($"[Main] Peer verbunden: {peerId}");
+    }
+
+    private void OnMultiplayerClientRegistered(long peerId)
+    {
         if (_multiplayerSession.Role == SessionRole.Host
             && _currentMaze is not null
             && _flowState is GameFlowState.Playing or GameFlowState.Paused)
         {
-            CallDeferred(nameof(SynchronizeLateJoinClient));
+            CallDeferred(nameof(SynchronizeLateJoinClient), peerId);
         }
 
-        GD.Print($"[Main] Peer verbunden: {peerId}");
+        GD.Print($"[Main] Client fuer Lobby registriert: {peerId}");
     }
 
     private void OnMultiplayerPeerLeft(long peerId)
@@ -1492,7 +1499,7 @@ public partial class Main : Node
         return true;
     }
 
-    private void BroadcastSessionStartIfHosting(string reason)
+    private void BroadcastSessionStartIfHosting(string reason, long recipientPeerId = 0)
     {
         if (_multiplayerSession.Role != SessionRole.Host || _currentMaze is null || _currentGameConfig is null)
         {
@@ -1541,10 +1548,12 @@ public partial class Main : Node
             Players = players
         };
 
-        Error result = _multiplayerSession.BroadcastSessionStart(payload);
+        Error result = recipientPeerId > 0
+            ? _multiplayerSession.SendSessionStartToPeer(recipientPeerId, payload)
+            : _multiplayerSession.BroadcastSessionStart(payload);
         if (result == Error.Ok)
         {
-            GD.Print($"[Main] {reason} Startvertrag={payload.SessionId}, Spieler={players.Count}");
+            GD.Print($"[Main] {reason} Startvertrag={payload.SessionId}, Spieler={players.Count}, Empfaenger={(recipientPeerId > 0 ? recipientPeerId : -1)}");
         }
     }
 
@@ -2169,9 +2178,9 @@ public partial class Main : Node
             : fallbackStartCell;
     }
 
-    private void SynchronizeLateJoinClient()
+    private void SynchronizeLateJoinClient(long peerId)
     {
-        BroadcastSessionStartIfHosting("Spaeter beigetretener Client wird mit dem aktuellen Lauf synchronisiert.");
+        BroadcastSessionStartIfHosting("Spaeter beigetretener Client wird mit dem aktuellen Lauf synchronisiert.", peerId);
     }
 
     private Cell ResolveGoalCell(global::Maze.Model.Maze maze) =>
