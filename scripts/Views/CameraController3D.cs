@@ -280,7 +280,7 @@ public partial class CameraController3D : Camera3D
         _firstPersonTarget = target;
         FirstPersonMode = true;
 
-        if (target.CurrentMode != PlayerCharacter3D.Mode.Manual)
+        if (!target.UsesLocalInput)
         {
             _yaw = target.GlobalRotation.Y;
             _pitch = 0f;
@@ -360,7 +360,7 @@ public partial class CameraController3D : Camera3D
             return;
         }
 
-        if (_firstPersonTarget.CurrentMode != PlayerCharacter3D.Mode.Manual)
+        if (!_firstPersonTarget.UsesLocalInput)
         {
             _yaw = _firstPersonTarget.GlobalRotation.Y;
             _pitch = 0f;
@@ -451,7 +451,7 @@ public partial class CameraController3D : Camera3D
             return;
         }
 
-        if (_firstPersonTarget.CurrentMode != PlayerCharacter3D.Mode.Manual)
+        if (!_firstPersonTarget.UsesLocalInput)
         {
             _yaw = _firstPersonTarget.GlobalRotation.Y;
             _pitch = 0f;

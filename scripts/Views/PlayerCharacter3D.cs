@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using Godot;
 using Maze.Model;
+using Maze.Network;
 
 namespace Maze.Views;
 
@@ -13,9 +14,9 @@ namespace Maze.Views;
 /// </summary>
 public partial class PlayerCharacter3D : CharacterBody3D
 {
-    [Signal] public delegate void GoalReachedEventHandler();
-    [Signal] public delegate void CellVisitedEventHandler(int x, int y);
-    [Signal] public delegate void StaminaChangedEventHandler(float current, float maximum, bool sprinting);
+    [Signal] public delegate void GoalReachedEventHandler(long peerId);
+    [Signal] public delegate void CellVisitedEventHandler(long peerId, int x, int y);
+    [Signal] public delegate void StaminaChangedEventHandler(long peerId, float current, float maximum, bool sprinting);
 
     [Export] public float PathMoveSpeed = 4f;
     [Export] public float ManualMoveSpeed = 2.2f;
@@ -35,6 +36,13 @@ public partial class PlayerCharacter3D : CharacterBody3D
         Manual
     }
 
+    public enum ControlAuthority
+    {
+        Scripted,
+        LocalInput,
+        Replicated
+    }
+
     private readonly List<Vector3> _waypoints = new();
     private int _currentIndex;
     private bool _isMoving;
@@ -46,21 +54,33 @@ public partial class PlayerCharacter3D : CharacterBody3D
     private LegoFigure? _figure;
     private bool _firstPersonActive;
     private float _currentStamina;
+    private float _effectiveMaximumStamina;
     private float _staminaRecoveryDelayRemaining;
     private bool _isSprinting;
 
     public bool IsMoving => _isMoving;
     public Vector2I? CurrentPlayerCell => _currentPlayerCell;
     public float CurrentStamina => _currentStamina;
-    public float MaximumStamina => MaxStamina;
+    public float MaximumStamina => _effectiveMaximumStamina;
     public bool IsSprinting => _isSprinting;
+    public long PeerId { get; private set; }
+    public ControlAuthority Authority { get; private set; } = ControlAuthority.Scripted;
     public Mode CurrentMode { get; private set; } = Mode.Idle;
+    public bool IsManualModeActive => CurrentMode == Mode.Manual;
+    public bool UsesLocalInput => CurrentMode == Mode.Manual && Authority == ControlAuthority.LocalInput;
+    public bool IsReplicatedAvatar => CurrentMode == Mode.Manual && Authority == ControlAuthority.Replicated;
 
     public override void _Ready()
     {
         _figure = GetNodeOrNull<LegoFigure>("Figure");
+        _effectiveMaximumStamina = MaxStamina;
         ResetStamina(emitSignal: false);
         ApplyVisualScale();
+    }
+
+    public void AssignPeerId(long peerId)
+    {
+        PeerId = peerId;
     }
 
     public new void Hide()
@@ -76,6 +96,7 @@ public partial class PlayerCharacter3D : CharacterBody3D
         _isSprinting = false;
         _isMoving = false;
         ResetStamina();
+        Authority = ControlAuthority.Scripted;
         CurrentMode = Mode.Idle;
         Visible = false;
     }
@@ -91,6 +112,7 @@ public partial class PlayerCharacter3D : CharacterBody3D
         }
 
         CurrentMode = Mode.FollowingPath;
+        Authority = ControlAuthority.Scripted;
 
         if (_waypoints.Count == 0)
         {
@@ -110,16 +132,28 @@ public partial class PlayerCharacter3D : CharacterBody3D
         if (!_isMoving)
         {
             CurrentMode = Mode.Idle;
-            EmitSignal(SignalName.GoalReached);
+            EmitSignal(SignalName.GoalReached, PeerId);
         }
     }
 
-    public void EnableManualMode(global::Maze.Model.Maze maze, Cell start, Cell goal, float cellSize, CameraController3D camera)
+    public void EnableManualMode(
+        global::Maze.Model.Maze maze,
+        Cell start,
+        Cell goal,
+        float cellSize,
+        CameraController3D? camera,
+        ControlAuthority authority = ControlAuthority.LocalInput)
     {
+        if (authority == ControlAuthority.LocalInput && camera is null)
+        {
+            throw new ArgumentNullException(nameof(camera));
+        }
+
         _cellSize = cellSize;
         _manualMaze = maze;
         _manualGoalCell = new Vector2I(goal.X, goal.Y);
         _manualCamera = camera;
+        Authority = authority;
         _waypoints.Clear();
         _currentIndex = 0;
         _isMoving = false;
@@ -135,6 +169,32 @@ public partial class PlayerCharacter3D : CharacterBody3D
         UpdateCurrentPlayerCell(forceEmit: true);
     }
 
+    public void ApplyReplicatedRuntimeState(global::Maze.Model.Maze maze, Cell goal, float cellSize, PlayerRuntimeState runtimeState)
+    {
+        _cellSize = cellSize;
+        _manualMaze = maze;
+        _manualGoalCell = new Vector2I(goal.X, goal.Y);
+        _manualCamera = null;
+        _waypoints.Clear();
+        _currentIndex = 0;
+        _staminaRecoveryDelayRemaining = 0f;
+        _currentStamina = Mathf.Max(0f, runtimeState.CurrentStamina);
+        _effectiveMaximumStamina = runtimeState.MaximumStamina > 0f ? runtimeState.MaximumStamina : MaxStamina;
+        _isSprinting = false;
+        _isMoving = false;
+        Velocity = Vector3.Zero;
+        Authority = runtimeState.IsManualMode ? ControlAuthority.Replicated : ControlAuthority.Scripted;
+        CurrentMode = runtimeState.IsManualMode ? Mode.Manual : Mode.Idle;
+
+        Vector2I currentCell = runtimeState.CurrentCell.ToVector2I();
+        GlobalPosition = global::Maze.MazeWorldGrid.CellToWorldCenter(currentCell, _cellSize, StandHeight);
+        _currentPlayerCell = currentCell;
+        ApplyVisualScale();
+        _figure?.SetWalking(false);
+        Visible = true;
+        EmitStaminaChanged();
+    }
+
     public void DisableManualMode()
     {
         _manualMaze = null;
@@ -148,6 +208,7 @@ public partial class PlayerCharacter3D : CharacterBody3D
         _isSprinting = false;
         Velocity = Vector3.Zero;
         ResetStamina();
+        Authority = ControlAuthority.Scripted;
         Visible = false;
         CurrentMode = Mode.Idle;
     }
@@ -231,7 +292,7 @@ public partial class PlayerCharacter3D : CharacterBody3D
                 _isMoving = false;
                 _figure?.SetWalking(false);
                 CurrentMode = Mode.Idle;
-                EmitSignal(SignalName.GoalReached);
+                EmitSignal(SignalName.GoalReached, PeerId);
             }
 
             return;
@@ -242,13 +303,23 @@ public partial class PlayerCharacter3D : CharacterBody3D
 
     private void ProcessManual(double delta)
     {
-        if (_manualMaze is null || _manualGoalCell is null || _manualCamera is null)
+        if (_manualMaze is null || _manualGoalCell is null)
         {
             _figure?.SetWalking(false);
             _isMoving = false;
             _isSprinting = false;
             Velocity = Vector3.Zero;
             CurrentMode = Mode.Idle;
+            return;
+        }
+
+        if (Authority != ControlAuthority.LocalInput || _manualCamera is null)
+        {
+            _figure?.SetWalking(false);
+            _isMoving = false;
+            _isSprinting = false;
+            Velocity = Vector3.Zero;
+            UpdateCurrentPlayerCell();
             return;
         }
 
@@ -295,7 +366,7 @@ public partial class PlayerCharacter3D : CharacterBody3D
         Velocity = Vector3.Zero;
         _figure?.SetWalking(false);
         CurrentMode = Mode.Idle;
-        EmitSignal(SignalName.GoalReached);
+        EmitSignal(SignalName.GoalReached, PeerId);
     }
 
     private float GetCurrentManualSpeed(bool sprinting) =>
@@ -338,7 +409,8 @@ public partial class PlayerCharacter3D : CharacterBody3D
 
     private void ResetStamina(bool emitSignal = true)
     {
-        _currentStamina = MaxStamina;
+        _effectiveMaximumStamina = MaxStamina;
+        _currentStamina = _effectiveMaximumStamina;
         _staminaRecoveryDelayRemaining = 0f;
         _isSprinting = false;
 
@@ -349,7 +421,7 @@ public partial class PlayerCharacter3D : CharacterBody3D
     }
 
     private void EmitStaminaChanged() =>
-        EmitSignal(SignalName.StaminaChanged, _currentStamina, MaxStamina, _isSprinting);
+        EmitSignal(SignalName.StaminaChanged, PeerId, _currentStamina, _effectiveMaximumStamina, _isSprinting);
 
     private void ApplyVisualScale()
     {
@@ -442,7 +514,7 @@ public partial class PlayerCharacter3D : CharacterBody3D
         }
 
         _currentPlayerCell = cell;
-        EmitSignal(SignalName.CellVisited, cell.X, cell.Y);
+        EmitSignal(SignalName.CellVisited, PeerId, cell.X, cell.Y);
         return true;
     }
 

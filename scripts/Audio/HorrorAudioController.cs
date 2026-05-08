@@ -202,7 +202,7 @@ public partial class HorrorAudioController : Node
 
 		if (!_manualModeActive
 			|| _player is null
-			|| _player.CurrentMode != PlayerCharacter3D.Mode.Manual
+			|| !_player.UsesLocalInput
 			|| !_player.IsMoving
 			|| _settings.MasterVolume <= 0f
 			|| _settings.FootstepVolume <= 0f)

@@ -151,7 +151,8 @@ public partial class Main : Node
         _hud.FirstPersonToggle += OnFirstPersonToggled;
         _hud.ExploreModeToggle += OnExploreModeToggled;
         _hud.UnboundedModeChanged += OnUnboundedModeChanged;
-        _player.GoalReached += OnBotGoalReached;
+        _player.AssignPeerId(LocalSessionPlayerId);
+        _player.GoalReached += OnPlayerGoalReached;
         _player.CellVisited += OnPlayerCellVisited;
         _player.StaminaChanged += OnPlayerStaminaChanged;
         _audioController.BindPlayer(_player);
@@ -853,8 +854,13 @@ public partial class Main : Node
         ApplyEffectiveRunnerMode();
     }
 
-    private void OnBotGoalReached()
+    private void OnPlayerGoalReached(long peerId)
     {
+        if (peerId != LocalSessionPlayerId)
+        {
+            return;
+        }
+
         _sessionState.GoalReached = true;
         UpdatePlayerRuntimeState(LocalSessionPlayerId, state => state.GoalReached = true);
 
@@ -878,8 +884,13 @@ public partial class Main : Node
         GD.Print("[Main] Bot ist am Ziel angekommen.");
     }
 
-    private void OnPlayerCellVisited(int x, int y)
+    private void OnPlayerCellVisited(long peerId, int x, int y)
     {
+        if (peerId != LocalSessionPlayerId)
+        {
+            return;
+        }
+
         Vector2I playerCell = new(x, y);
         UpdatePlayerRuntimeState(LocalSessionPlayerId, state => state.CurrentCell = MazePointSaveData.FromVector2I(playerCell));
         _audioController.UpdatePlayerCell(playerCell);
@@ -941,7 +952,7 @@ public partial class Main : Node
         _hud.SetUse3DActive(true);
         OnViewToggled(true);
 
-        _player.EnableManualMode(_currentMaze, _solverStart, _solverGoal, _view3D.CellSize, _camera3D);
+        _player.EnableManualMode(_currentMaze, _solverStart, _solverGoal, _view3D.CellSize, _camera3D, PlayerCharacter3D.ControlAuthority.LocalInput);
         _isManualMode = true;
         _sessionState.IsManualMode = true;
         UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
@@ -1011,8 +1022,13 @@ public partial class Main : Node
         _player.PathMoveSpeed = Mathf.Clamp(stepsPerSecond, 0.5f, MaxSimulationSpeed);
     }
 
-    private void OnPlayerStaminaChanged(float current, float maximum, bool sprinting)
+    private void OnPlayerStaminaChanged(long peerId, float current, float maximum, bool sprinting)
     {
+        if (peerId != LocalSessionPlayerId)
+        {
+            return;
+        }
+
         UpdatePlayerRuntimeState(LocalSessionPlayerId, state =>
         {
             state.CurrentStamina = current;
@@ -1338,7 +1354,7 @@ public partial class Main : Node
             state.CurrentCell = new MazePointSaveData(playerCell.X, playerCell.Y);
             state.CurrentStamina = _player.CurrentStamina;
             state.MaximumStamina = _player.MaximumStamina;
-            state.IsManualMode = _player.CurrentMode == PlayerCharacter3D.Mode.Manual;
+            state.IsManualMode = _player.IsManualModeActive;
             state.GoalReached = _sessionState.GoalReached;
             state.IsAlive = _sessionState.IsPlayerAlive;
         }
@@ -1397,6 +1413,7 @@ public partial class Main : Node
             _multiplayerSession.StatusMessage,
             _multiplayerSession.ConnectedPeerIds,
             _multiplayerSession.LocalPeerId);
+        _player.AssignPeerId(LocalSessionPlayerId);
     }
 
     private bool CanRunLocalWorldAction(string actionName)
