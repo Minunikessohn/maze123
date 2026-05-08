@@ -64,8 +64,8 @@ public partial class MainMenu : Control
     public event Action<string, MazeGameConfig>? StartNewMazeRequested;
     public event Action<string>? LoadMazeRequested;
     public event Action<string>? DeleteMazeRequested;
-    public event Action<int>? HostSessionRequested;
-    public event Action<string, int>? JoinSessionRequested;
+    public event Action<string, int>? HostSessionRequested;
+    public event Action<string, string, int>? JoinSessionRequested;
     public event Action? LeaveSessionRequested;
 
     public override void _Ready()
@@ -293,10 +293,10 @@ public partial class MainMenu : Control
         switch (_currentSessionMode)
         {
             case SessionMode.Host:
-                HostSessionRequested?.Invoke(port);
+                HostSessionRequested?.Invoke(GetRequestedPlayerName(), port);
                 break;
             case SessionMode.Join:
-                JoinSessionRequested?.Invoke(_sessionAddressEdit.Text.Trim(), port);
+                JoinSessionRequested?.Invoke(GetRequestedPlayerName(), _sessionAddressEdit.Text.Trim(), port);
                 break;
         }
     }
@@ -419,5 +419,5 @@ public partial class MainMenu : Control
 
     private bool IsSessionActive() =>
         _sessionRole is SessionRole.Host or SessionRole.Client
-        || _connectionStatus is ConnectionStatus.Starting or ConnectionStatus.Hosting or ConnectionStatus.Connecting or ConnectionStatus.Connected;
+        || _connectionStatus is ConnectionStatus.Starting or ConnectionStatus.Hosting or ConnectionStatus.Connecting or ConnectionStatus.Connected or ConnectionStatus.Synchronized;
 }

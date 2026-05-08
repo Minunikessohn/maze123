@@ -121,6 +121,8 @@ public partial class Main : Node
         _multiplayerSession.StateChanged += OnMultiplayerSessionStateChanged;
         _multiplayerSession.PeerJoined += OnMultiplayerPeerJoined;
         _multiplayerSession.PeerLeft += OnMultiplayerPeerLeft;
+        _multiplayerSession.SessionStartReceived += OnSessionStartReceived;
+        _multiplayerSession.SessionStartAcknowledged += OnSessionStartAcknowledged;
         _pauseMenu.VisualSettingsChanged += OnVisualSettingsChanged;
         _pauseMenu.AudioSettingsChanged += OnAudioSettingsChanged;
         _pauseMenu.ReturnToMainMenuRequested += OnReturnToMainMenuRequested;
@@ -225,6 +227,8 @@ public partial class Main : Node
             _multiplayerSession.StateChanged -= OnMultiplayerSessionStateChanged;
             _multiplayerSession.PeerJoined -= OnMultiplayerPeerJoined;
             _multiplayerSession.PeerLeft -= OnMultiplayerPeerLeft;
+            _multiplayerSession.SessionStartReceived -= OnSessionStartReceived;
+            _multiplayerSession.SessionStartAcknowledged -= OnSessionStartAcknowledged;
             _multiplayerSession.StopSession("Anwendung beendet.");
         }
 
@@ -425,11 +429,14 @@ public partial class Main : Node
             OnPlayManualRequested();
         }
 
+        BroadcastSessionStartIfHosting("Neues Labyrinth vom Host gestartet.");
+
         GD.Print("[Main] Generator fertig.");
     }
 
     private void OnSolveRequested(string solverId)
     {
+        BroadcastSessionStartIfHosting("Host hat einen Spielstand fuer die Lobby geladen.");
         if (!IsSandboxMode())
         {
             GD.Print("[Main] Solver im normalen Modus deaktiviert.");
@@ -604,18 +611,18 @@ public partial class Main : Node
         TransitionToState(GameFlowState.MainMenu);
     }
 
-    private void OnHostSessionRequested(int port)
+    private void OnHostSessionRequested(string playerName, int port)
     {
-        Error result = _multiplayerSession.StartHost(port);
+        Error result = _multiplayerSession.StartHost(playerName, port);
         if (result == Error.Ok)
         {
             GD.Print($"[Main] Host-Session gestartet auf Port {port}.");
         }
     }
 
-    private void OnJoinSessionRequested(string address, int port)
+    private void OnJoinSessionRequested(string playerName, string address, int port)
     {
-        Error result = _multiplayerSession.JoinSession(address, port);
+        Error result = _multiplayerSession.JoinSession(playerName, address, port);
         if (result == Error.Ok)
         {
             GD.Print($"[Main] Client-Verbindung gestartet zu {address}:{port}.");
@@ -644,6 +651,34 @@ public partial class Main : Node
     {
         SyncMultiplayerSessionState();
         GD.Print($"[Main] Peer getrennt: {peerId}");
+    }
+
+    private void OnSessionStartReceived(SessionStartPayload payload)
+    {
+        if (_multiplayerSession.Role != SessionRole.Client)
+        {
+            return;
+        }
+
+        TransitionToState(GameFlowState.Loading);
+
+        if (!TryApplySessionStartPayload(payload))
+        {
+            TransitionToState(GameFlowState.MainMenu);
+            return;
+        }
+
+        GameFlowState targetState = payload.World.FlowState == GameFlowState.Paused
+            ? GameFlowState.Paused
+            : GameFlowState.Playing;
+        TransitionToState(targetState);
+        _multiplayerSession.ConfirmSessionStartApplied(payload.SessionId);
+        GD.Print($"[Main] Startvertrag empfangen und angewendet: {payload.SessionId}");
+    }
+
+    private void OnSessionStartAcknowledged(long peerId, string sessionId)
+    {
+        GD.Print($"[Main] Client {peerId} hat Startvertrag {sessionId} bestaetigt.");
     }
 
     private void OnStepRequested() =>
@@ -1100,7 +1135,7 @@ public partial class Main : Node
         }
     }
 
-    private bool TryLoadMaze(MazeSaveData saveData)
+    private bool TryLoadMaze(MazeSaveData saveData, bool allowAutoManualStart = true)
     {
         try
         {
@@ -1138,7 +1173,7 @@ public partial class Main : Node
             ConfigureMonsterSystem();
             SyncDayNightState();
 
-            if (!IsSandboxMode())
+            if (allowAutoManualStart && !IsSandboxMode())
             {
                 OnPlayManualRequested();
             }
@@ -1151,6 +1186,118 @@ public partial class Main : Node
             GD.PrintErr($"[Main] Save konnte nicht geladen werden: {ex.Message}");
             return false;
         }
+    }
+
+    private bool TryApplySessionStartPayload(SessionStartPayload payload)
+    {
+        if (payload.ContractVersion != SessionStartPayload.CurrentContractVersion)
+        {
+            GD.PrintErr($"[Main] Unbekannte Startvertrags-Version: {payload.ContractVersion}");
+            return false;
+        }
+
+        MazeSaveData saveData = payload.World.SaveData;
+        saveData.Config = payload.GameConfig.Clone().Sanitize();
+
+        if (!TryLoadMaze(saveData, allowAutoManualStart: false))
+        {
+            return false;
+        }
+
+        _sessionState.DayNightProgress = payload.World.DayNightProgress;
+        _sessionState.GoalReached = payload.World.GoalReached;
+        _sessionState.IsManualMode = false;
+        _isManualMode = false;
+
+        if (_currentGameConfig is not null)
+        {
+            ConfigureDayNightCycle(_currentGameConfig);
+            SyncDayNightState();
+        }
+
+        return true;
+    }
+
+    private void BroadcastSessionStartIfHosting(string reason)
+    {
+        if (_multiplayerSession.Role != SessionRole.Host || _currentMaze is null || _currentGameConfig is null)
+        {
+            return;
+        }
+
+        Cell startCell = ResolveStartCell(_currentMaze);
+        Cell goalCell = ResolveGoalCell(_currentMaze);
+        MazeSaveData sessionSaveData = _mazeSerializer.CreateSaveData(
+            _pendingSaveDisplayName,
+            _currentGameConfig,
+            _currentMaze,
+            startCell,
+            goalCell,
+            GetTrapDefinitionsForSave(),
+            _sessionState.MonsterSpawnCells);
+
+        MazePointSaveData startPoint = new(startCell.X, startCell.Y);
+        IReadOnlyList<PlayerIdentity> playerIdentities = _multiplayerSession.BuildPlayerIdentities(startPoint);
+        List<PlayerSnapshot> players = new(playerIdentities.Count);
+
+        foreach (PlayerIdentity playerIdentity in playerIdentities)
+        {
+            players.Add(new PlayerSnapshot
+            {
+                Identity = playerIdentity,
+                RuntimeState = CreatePlayerRuntimeState(playerIdentity, startPoint)
+            });
+        }
+
+        SessionStartPayload payload = new()
+        {
+            HostPeerId = _multiplayerSession.LocalPeerId,
+            GameConfig = _currentGameConfig.Clone().Sanitize(),
+            World = new GameWorldSnapshot
+            {
+                SaveData = sessionSaveData,
+                FlowState = _flowState,
+                DayNightProgress = _sessionState.DayNightProgress,
+                IsManualMode = _sessionState.IsManualMode,
+                GoalReached = _sessionState.GoalReached
+            },
+            Players = players
+        };
+
+        Error result = _multiplayerSession.BroadcastSessionStart(payload);
+        if (result == Error.Ok)
+        {
+            GD.Print($"[Main] {reason} Startvertrag={payload.SessionId}, Spieler={players.Count}");
+        }
+    }
+
+    private PlayerRuntimeState CreatePlayerRuntimeState(PlayerIdentity playerIdentity, MazePointSaveData defaultSpawnCell)
+    {
+        MazePointSaveData runtimeCell = defaultSpawnCell;
+        float currentStamina = 1f;
+        float maximumStamina = 1f;
+        bool isManualMode = false;
+        bool goalReached = false;
+
+        if (playerIdentity.PeerId == _multiplayerSession.LocalPeerId && _player.Visible)
+        {
+            Vector2I playerCell = _player.CurrentPlayerCell ?? new Vector2I(defaultSpawnCell.X, defaultSpawnCell.Y);
+            runtimeCell = new MazePointSaveData(playerCell.X, playerCell.Y);
+            currentStamina = _player.CurrentStamina;
+            maximumStamina = _player.MaximumStamina;
+            isManualMode = _player.CurrentMode == PlayerCharacter3D.Mode.Manual;
+            goalReached = _sessionState.GoalReached;
+        }
+
+        return new PlayerRuntimeState
+        {
+            CurrentCell = runtimeCell,
+            CurrentStamina = currentStamina,
+            MaximumStamina = maximumStamina,
+            IsAlive = _sessionState.IsPlayerAlive,
+            GoalReached = goalReached,
+            IsManualMode = isManualMode
+        };
     }
 
     private void RefreshSaveSlots() =>

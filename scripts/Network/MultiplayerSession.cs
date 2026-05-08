@@ -2,16 +2,29 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
 using Godot;
+using Maze.Game;
 
 namespace Maze.Network;
 
 public partial class MultiplayerSession : Node
 {
     private const int DefaultMaxClients = 4;
+    private const long HostPeerId = 1;
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
 
     private ENetMultiplayerPeer? _peer;
     private readonly HashSet<long> _connectedPeers = new();
+    private readonly Dictionary<long, string> _registeredPlayerNames = new();
+    private readonly HashSet<long> _synchronizedPeers = new();
+    private string _localPlayerName = "Spieler";
+    private string _activeSessionStartId = string.Empty;
 
     public SessionRole Role { get; private set; } = SessionRole.Offline;
     public ConnectionStatus Status { get; private set; } = ConnectionStatus.Offline;
@@ -22,6 +35,8 @@ public partial class MultiplayerSession : Node
     public event Action<SessionRole, ConnectionStatus, string>? StateChanged;
     public event Action<long>? PeerJoined;
     public event Action<long>? PeerLeft;
+    public event Action<SessionStartPayload>? SessionStartReceived;
+    public event Action<long, string>? SessionStartAcknowledged;
 
     public override void _Ready()
     {
@@ -42,7 +57,7 @@ public partial class MultiplayerSession : Node
         ReleasePeer();
     }
 
-    public Error StartHost(int port, int maxClients = DefaultMaxClients)
+    public Error StartHost(string playerName, int port, int maxClients = DefaultMaxClients)
     {
         StopSession();
 
@@ -50,6 +65,8 @@ public partial class MultiplayerSession : Node
         {
             return Fail("Ungueltiger Port fuer Host-Session.");
         }
+
+        _localPlayerName = SanitizePlayerName(playerName, "Host");
 
         ApplyState(SessionRole.Host, ConnectionStatus.Starting, $"Host startet auf Port {port}...");
         ENetMultiplayerPeer peer = new();
@@ -67,13 +84,15 @@ public partial class MultiplayerSession : Node
         if (localPeerId > 0)
         {
             _connectedPeers.Add(localPeerId);
+            RegisterPlayerName(localPeerId, _localPlayerName);
+            _synchronizedPeers.Add(localPeerId);
         }
 
         ApplyState(SessionRole.Host, ConnectionStatus.Hosting, $"Host aktiv auf Port {port}. Warte auf Clients.");
         return Error.Ok;
     }
 
-    public Error JoinSession(string address, int port)
+    public Error JoinSession(string playerName, string address, int port)
     {
         StopSession();
 
@@ -87,6 +106,7 @@ public partial class MultiplayerSession : Node
             return Fail("Ungueltiger Port fuer Client-Verbindung.");
         }
 
+        _localPlayerName = SanitizePlayerName(playerName, "Spieler");
         string sanitizedAddress = address.Trim();
         ApplyState(SessionRole.Client, ConnectionStatus.Connecting, $"Verbinde zu {sanitizedAddress}:{port}...");
         ENetMultiplayerPeer peer = new();
@@ -109,10 +129,102 @@ public partial class MultiplayerSession : Node
         ApplyState(SessionRole.Offline, ConnectionStatus.Offline, message);
     }
 
+    public IReadOnlyList<PlayerIdentity> BuildPlayerIdentities(MazePointSaveData defaultSpawnCell)
+    {
+        List<long> orderedPeerIds = _connectedPeers.OrderBy(peerId => peerId).ToList();
+        List<PlayerIdentity> players = new(orderedPeerIds.Count);
+
+        for (int index = 0; index < orderedPeerIds.Count; index++)
+        {
+            long peerId = orderedPeerIds[index];
+            bool isHost = peerId == HostPeerId || (Role == SessionRole.Host && peerId == LocalPeerId);
+            players.Add(new PlayerIdentity
+            {
+                PeerId = peerId,
+                PlayerName = ResolvePlayerName(peerId, isHost),
+                PlayerSlot = index,
+                IsHost = isHost,
+                AssignedSpawnCell = new MazePointSaveData(defaultSpawnCell.X, defaultSpawnCell.Y)
+            });
+        }
+
+        return players;
+    }
+
+    public Error BroadcastSessionStart(SessionStartPayload payload)
+    {
+        if (Role != SessionRole.Host)
+        {
+            GD.PrintErr("[MultiplayerSession] Nur der Host darf den Startvertrag senden.");
+            return Error.Failed;
+        }
+
+        if (payload is null)
+        {
+            GD.PrintErr("[MultiplayerSession] Startvertrag fehlt.");
+            return Error.InvalidData;
+        }
+
+        if (string.IsNullOrWhiteSpace(payload.SessionId))
+        {
+            payload.SessionId = Guid.NewGuid().ToString("N");
+        }
+
+        payload.ContractVersion = SessionStartPayload.CurrentContractVersion;
+        payload.CreatedAtUtc = DateTime.UtcNow;
+        payload.HostPeerId = LocalPeerId;
+        _activeSessionStartId = payload.SessionId;
+        _synchronizedPeers.Clear();
+
+        if (LocalPeerId > 0)
+        {
+            _synchronizedPeers.Add(LocalPeerId);
+        }
+
+        int remoteRecipients = 0;
+        foreach (long peerId in _connectedPeers.OrderBy(peerId => peerId))
+        {
+            if (peerId == LocalPeerId)
+            {
+                continue;
+            }
+
+            SessionStartPayload peerPayload = ClonePayloadForRecipient(payload, peerId);
+            string serializedPayload = JsonSerializer.Serialize(peerPayload, JsonOptions);
+            RpcId(peerId, nameof(ReceiveSessionStartPayloadRpc), serializedPayload);
+            remoteRecipients++;
+        }
+
+        ApplyState(
+            SessionRole.Host,
+            ConnectionStatus.Hosting,
+            remoteRecipients > 0
+                ? $"Startvertrag {_activeSessionStartId} an {remoteRecipients} Client(s) gesendet."
+                : "Host aktiv. Noch keine Clients fuer den Startvertrag verbunden.");
+        return Error.Ok;
+    }
+
+    public void ConfirmSessionStartApplied(string sessionId)
+    {
+        if (Role != SessionRole.Client || string.IsNullOrWhiteSpace(sessionId) || !string.Equals(sessionId, _activeSessionStartId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (LocalPeerId > 0)
+        {
+            _synchronizedPeers.Add(LocalPeerId);
+        }
+
+        RpcId(HostPeerId, nameof(AcknowledgeSessionStartRpc), sessionId);
+        ApplyState(SessionRole.Client, ConnectionStatus.Synchronized, $"Startvertrag {sessionId} angewendet. Client ist synchronisiert.");
+    }
+
     private void OnPeerConnected(long peerId)
     {
         if (_connectedPeers.Add(peerId))
         {
+            _synchronizedPeers.Remove(peerId);
             ApplyState(Role, Status, $"Peer {peerId} verbunden. Aktive Peers: {_connectedPeers.Count}.");
             PeerJoined?.Invoke(peerId);
         }
@@ -122,6 +234,8 @@ public partial class MultiplayerSession : Node
     {
         if (_connectedPeers.Remove(peerId))
         {
+            _registeredPlayerNames.Remove(peerId);
+            _synchronizedPeers.Remove(peerId);
             ApplyState(Role, Status, $"Peer {peerId} getrennt. Aktive Peers: {_connectedPeers.Count}.");
             PeerLeft?.Invoke(peerId);
         }
@@ -134,9 +248,11 @@ public partial class MultiplayerSession : Node
         if (localPeerId > 0)
         {
             _connectedPeers.Add(localPeerId);
+            RegisterPlayerName(localPeerId, _localPlayerName);
         }
 
         ApplyState(SessionRole.Client, ConnectionStatus.Connected, $"Mit Host verbunden. Lokale Peer-ID: {localPeerId}.");
+        RpcId(HostPeerId, nameof(RegisterClientPlayerRpc), _localPlayerName);
     }
 
     private void OnConnectionFailed()
@@ -174,6 +290,80 @@ public partial class MultiplayerSession : Node
         }
 
         _connectedPeers.Clear();
+        _registeredPlayerNames.Clear();
+        _synchronizedPeers.Clear();
+        _activeSessionStartId = string.Empty;
+    }
+
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void RegisterClientPlayerRpc(string playerName)
+    {
+        if (Role != SessionRole.Host)
+        {
+            return;
+        }
+
+        long senderPeerId = Multiplayer.GetRemoteSenderId();
+        if (senderPeerId <= 0)
+        {
+            return;
+        }
+
+        RegisterPlayerName(senderPeerId, playerName);
+        ApplyState(SessionRole.Host, ConnectionStatus.Hosting, $"Lobby aktualisiert. Peer {senderPeerId} ist als '{ResolvePlayerName(senderPeerId, false)}' registriert.");
+    }
+
+    [Rpc(MultiplayerApi.RpcMode.Authority, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void ReceiveSessionStartPayloadRpc(string payloadJson)
+    {
+        if (Role != SessionRole.Client)
+        {
+            return;
+        }
+
+        SessionStartPayload? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<SessionStartPayload>(payloadJson, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            Fail($"Startvertrag konnte nicht gelesen werden: {ex.Message}");
+            return;
+        }
+
+        if (payload is null)
+        {
+            Fail("Startvertrag fehlt oder ist leer.");
+            return;
+        }
+
+        _activeSessionStartId = payload.SessionId;
+        ApplyState(SessionRole.Client, ConnectionStatus.Connected, $"Startvertrag {payload.SessionId} empfangen. Welt wird synchronisiert.");
+        SessionStartReceived?.Invoke(payload);
+    }
+
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void AcknowledgeSessionStartRpc(string sessionId)
+    {
+        if (Role != SessionRole.Host || string.IsNullOrWhiteSpace(sessionId) || !string.Equals(sessionId, _activeSessionStartId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        long senderPeerId = Multiplayer.GetRemoteSenderId();
+        if (senderPeerId <= 0 || !_connectedPeers.Contains(senderPeerId))
+        {
+            return;
+        }
+
+        if (_synchronizedPeers.Add(senderPeerId))
+        {
+            int remotePeerCount = Math.Max(0, _connectedPeers.Count - 1);
+            int readyPeerCount = Math.Max(0, _synchronizedPeers.Count - 1);
+            ApplyState(SessionRole.Host, ConnectionStatus.Hosting, $"Client {senderPeerId} hat Startvertrag bestaetigt ({readyPeerCount}/{remotePeerCount}).");
+            SessionStartAcknowledged?.Invoke(senderPeerId, sessionId);
+        }
     }
 
     private void ApplyState(SessionRole role, ConnectionStatus status, string message)
@@ -182,6 +372,48 @@ public partial class MultiplayerSession : Node
         Status = status;
         StatusMessage = string.IsNullOrWhiteSpace(message) ? "Keine Sitzung aktiv." : message;
         StateChanged?.Invoke(Role, Status, StatusMessage);
+    }
+
+    private void RegisterPlayerName(long peerId, string playerName)
+    {
+        _registeredPlayerNames[peerId] = SanitizePlayerName(playerName, peerId == HostPeerId ? "Host" : $"Spieler {peerId}");
+    }
+
+    private string ResolvePlayerName(long peerId, bool isHost)
+    {
+        if (_registeredPlayerNames.TryGetValue(peerId, out string? playerName) && !string.IsNullOrWhiteSpace(playerName))
+        {
+            return playerName;
+        }
+
+        if (peerId == LocalPeerId && !string.IsNullOrWhiteSpace(_localPlayerName))
+        {
+            return _localPlayerName;
+        }
+
+        return isHost ? "Host" : $"Spieler {peerId}";
+    }
+
+    private static string SanitizePlayerName(string? playerName, string fallbackName)
+    {
+        string sanitizedName = string.IsNullOrWhiteSpace(playerName) ? fallbackName : playerName.Trim();
+        return sanitizedName.Length <= 24 ? sanitizedName : sanitizedName[..24];
+    }
+
+    private static SessionStartPayload ClonePayloadForRecipient(SessionStartPayload payload, long recipientPeerId)
+    {
+        return new SessionStartPayload
+        {
+            ContractVersion = payload.ContractVersion,
+            SessionId = payload.SessionId,
+            CreatedAtUtc = payload.CreatedAtUtc,
+            HostPeerId = payload.HostPeerId,
+            RecipientPeerId = recipientPeerId,
+            IsAuthoritativeHostStart = payload.IsAuthoritativeHostStart,
+            GameConfig = payload.GameConfig.Clone().Sanitize(),
+            World = payload.World,
+            Players = payload.Players
+        };
     }
 
     private static bool IsValidPort(int port) => port is >= 1 and <= 65535;

@@ -50,6 +50,10 @@ public partial class PlayerCharacter3D : CharacterBody3D
     private bool _isSprinting;
 
     public bool IsMoving => _isMoving;
+    public Vector2I? CurrentPlayerCell => _currentPlayerCell;
+    public float CurrentStamina => _currentStamina;
+    public float MaximumStamina => MaxStamina;
+    public bool IsSprinting => _isSprinting;
     public Mode CurrentMode { get; private set; } = Mode.Idle;
 
     public override void _Ready()

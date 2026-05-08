@@ -9,5 +9,6 @@ public enum ConnectionStatus
     Hosting,
     Connecting,
     Connected,
+    Synchronized,
     Error
 }
